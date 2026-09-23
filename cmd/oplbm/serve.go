@@ -15,6 +15,7 @@ import (
 	"github.com/jo/TinyPS2Manager/internal/library"
 	"github.com/jo/TinyPS2Manager/internal/queue"
 	"github.com/jo/TinyPS2Manager/internal/transfer"
+	webui "github.com/jo/TinyPS2Manager/web"
 )
 
 // defaultBind is localhost-only. Binding 0.0.0.0 exposes the API (which has
@@ -78,7 +79,11 @@ func cmdServe(args []string) error {
 	if host == "0.0.0.0" || host == ":41337" || len(host) > 0 && host[0] == ':' {
 		fmt.Fprintln(os.Stderr, "WARNING: listening beyond localhost exposes the unauthenticated API to the network")
 	}
-	httpSrv := &http.Server{Addr: host, Handler: srv.Handler()}
+	// /api/* hits the REST+SSE surface; everything else serves the UI.
+	mux := http.NewServeMux()
+	mux.Handle("/api/", srv.Handler())
+	mux.Handle("/", webui.Handler())
+	httpSrv := &http.Server{Addr: host, Handler: mux}
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -17,6 +17,27 @@ jobs:
       - run: test -z "$(gofmt -l cmd internal testdata scripts)" || (gofmt -l cmd internal testdata scripts && exit 1)
       - run: go test ./...
 
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm run check
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+      - name: bundle budget (warn over 250 KiB uncompressed)
+        run: |
+          size=$(du -sb web/dist | cut -f1)
+          echo "web/dist: $size bytes"
+          test "$size" -le 256000 || echo "::warning::web bundle $size bytes exceeds 250 KiB budget"
+
   cross-build:
     runs-on: ubuntu-latest
     strategy:

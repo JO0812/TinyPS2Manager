@@ -134,6 +134,10 @@ func (p *TreePlan) Paths() (dirs, files []string, err error) {
 	return dirs, fileList, nil
 }
 
+// ValidateBDMPrefix checks a user-supplied BDM prefix (also used by the
+// API destination endpoints).
+func ValidateBDMPrefix(prefix string) error { return checkPrefix(prefix) }
+
 // checkPrefix validates the BDM prefix: relative, no "..", no absolutes.
 func checkPrefix(prefix string) error {
 	if prefix == "" {

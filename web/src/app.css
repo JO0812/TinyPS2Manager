@@ -1,0 +1,195 @@
+/* OPL Backup Manager theme: CSS custom properties, no framework.
+   Dark is the default (mockup); light overrides below. */
+
+:root,
+[data-theme="dark"] {
+  --bg: #070b14;
+  --bg-raised: #0a101c;
+  --surface: #0e1626;
+  --surface-hover: #152238;
+  --border: #1e2f4d;
+  --fg: #e8eefc;
+  --fg-muted: #8b98b0;
+  --fg-faint: #55627a;
+  --accent: #8fbfff;
+  --accent-hover: #a9d0ff;
+  --accent-soft: rgba(143, 191, 255, 0.12);
+  --accent-border: #4a86c8;
+  --success: #34d399;
+  --success-soft: rgba(52, 211, 153, 0.14);
+  --danger: #f87171;
+  --danger-soft: rgba(248, 113, 113, 0.14);
+  --warning: #fbbf24;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --bg: #eaf1f9;
+  --bg-raised: #ffffff;
+  --surface: #ffffff;
+  --surface-hover: #e6eef8;
+  --border: #d3e0f0;
+  --fg: #0d1b2e;
+  --fg-muted: #4a6079;
+  --fg-faint: #8499b3;
+  --accent: #0b6fd6;
+  --accent-hover: #1d82e8;
+  --accent-soft: rgba(11, 111, 214, 0.1);
+  --accent-border: #0b6fd6;
+  --success: #059669;
+  --success-soft: rgba(5, 150, 105, 0.1);
+  --danger: #dc2626;
+  --danger-soft: rgba(220, 38, 38, 0.08);
+  --warning: #b45309;
+  --shadow: 0 8px 24px rgba(23, 23, 31, 0.08);
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+input,
+select {
+  font: inherit;
+  color: var(--fg);
+}
+
+a {
+  color: var(--accent);
+}
+
+/* Shared primitives */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  padding: 10px 18px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover);
+}
+
+.btn-ghost {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 8px 14px;
+  border-radius: 10px;
+  color: var(--fg-muted);
+}
+
+.btn-ghost:hover {
+  background: var(--surface-hover);
+  color: var(--fg);
+}
+
+.btn-danger-ghost {
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+  border-radius: 8px;
+  color: var(--danger);
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+
+.pill-green {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.pill-purple {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.pill-gray {
+  background: var(--surface-hover);
+  color: var(--fg-muted);
+}
+
+.field {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  width: 100%;
+}
+
+.field:focus {
+  outline: 2px solid var(--accent-border);
+  outline-offset: -1px;
+}
+
+.eyebrow {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 0 0 4px;
+}
+
+h1.view-title {
+  font-size: 28px;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+.muted {
+  color: var(--fg-muted);
+}
+
+.progress-track {
+  background: var(--surface-hover);
+  border-radius: 999px;
+  height: 8px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  background: var(--accent);
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.25s ease;
+}

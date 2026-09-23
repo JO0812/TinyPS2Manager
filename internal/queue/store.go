@@ -108,6 +108,20 @@ func (s *Store) UpdateDestinationPrefix(id int64, prefix string) error {
 	return err
 }
 
+// UpdateDestinationOverride sets the explicit filesystem choice
+// ("" clears it back to detection).
+func (s *Store) UpdateDestinationOverride(id int64, override string) error {
+	if override != "" && override != "fat32" && override != "exfat" {
+		return fmt.Errorf("bad filesystem override %q", override)
+	}
+	res, err := s.db.Exec(`UPDATE destinations SET fs_override=?,
+		updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`, override, id)
+	if err != nil {
+		return err
+	}
+	return expectOne(res, id, "override (missing destination)")
+}
+
 // RefreshDestinationStats records freshly probed filesystem/free space.
 func (s *Store) RefreshDestinationStats(id int64, filesystem string, freeBytes int64) error {
 	_, err := s.db.Exec(`UPDATE destinations SET filesystem=?, free_bytes=?,

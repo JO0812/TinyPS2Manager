@@ -13,7 +13,8 @@ testdata/*.db
 
 # Frontend
 /web/node_modules/
-/web/dist/
+/web/dist/*
+!/web/dist/.gitkeep
 /web/.svelte-kit/
 
 # Wails build output
