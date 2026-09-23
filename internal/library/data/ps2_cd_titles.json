@@ -1,5 +1,5 @@
 {
-  "_comment": "Bundled known PS2 CD titles by serial. User-extensible via ps2_cd_titles.user.json in the config dir. Disc-type detection (spec §2.3 #4) prefers this database over the heuristic.",
-  "_schema": { "serial": "TITLE", "discType": "cd|dvd" },
-  "_version": 1
+  "_comment": "Bundled known PS2 titles by serial. User-extensible via ps2_cd_titles.user.json in the config dir. Disc-type detection (spec §2.3 #4) prefers this database over the heuristic on disagreement. Ships unpopulated until curated entries land; the user file is the live extension point.",
+  "_version": 1,
+  "titles": {}
 }
