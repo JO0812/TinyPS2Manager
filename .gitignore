@@ -15,7 +15,7 @@ testdata/*.db
 /web/node_modules/
 /scripts/uiflow/node_modules/
 /web/dist/*
-!/web/dist/.gitkeep
+!/web/dist/README.md
 /web/.svelte-kit/
 
 # Wails build output
