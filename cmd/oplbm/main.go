@@ -1,10 +1,93 @@
-// Package main is the entrypoint for the oplbm Wails application.
+// Package main is the oplbm command-line interface (M1 milestone owner:
+// import, inspect, convert, split, tree against the real engines).
 //
-// It embeds the compiled frontend (web/dist) via go:embed and serves the
-// REST + SSE API surface on localhost. The native window/tray shell is
-// provided by Wails (spec §10 Q4 — wrapped desktop app).
+// The Wails desktop shell and HTTP API land in M2/M3; this CLI stays as the
+// scriptable, testable front end afterwards.
 package main
 
+import (
+	"flag"
+	"fmt"
+	"os"
+	"path/filepath"
+)
+
 func main() {
-	// Phase 0: stub entrypoint. Wails wiring lands in M2 alongside the API.
+	os.Exit(run(os.Args[1:]))
+}
+
+func run(args []string) int {
+	if len(args) < 1 {
+		usage()
+		return 2
+	}
+	var err error
+	switch args[0] {
+	case "import":
+		err = cmdImport(args[1:])
+	case "inspect":
+		err = cmdInspect(args[1:])
+	case "convert":
+		err = cmdConvert(args[1:])
+	case "split":
+		err = cmdSplit(args[1:])
+	case "tree":
+		err = cmdTree(args[1:])
+	case "-h", "-help", "--help", "help":
+		usage()
+	default:
+		fmt.Fprintf(os.Stderr, "unknown command %q\n", args[0])
+		usage()
+		return 2
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func usage() {
+	fmt.Fprintf(os.Stderr, `oplbm — OPL/POPSTARTER backup manager (M1 CLI)
+
+Usage:
+  oplbm import [--db path] <dir>                scan sources, detect, persist
+  oplbm inspect [--db path] <id|path>           show detected type + method
+  oplbm convert --out <dir> [--db path] <ps1-id|.cue>
+                                            CUE/BIN -> VCD
+  oplbm split --out <dir> [--name N] [--serial S] <iso>
+                                            ISO -> USBExtreme set at out root
+  oplbm tree --plan <jobs.json> --dest <root> [--prefix P]
+                                            dry-run the destination tree
+(note: flags must precede positional args — Go flag convention)
+
+Flags:
+`)
+	flag.PrintDefaults()
+	fmt.Fprintf(os.Stderr, `
+jobs.json schema:
+  {"files": [{"bucket": "DVD|CD|POPS|...", "subdir": "", "name": "Game.iso"}],
+   "multidisc": [{"vcds": ["A.VCD", "B.VCD"], "vmcdir": "A"}]}
+`)
+}
+
+// defaultDBPath is the SQLite library location, overridable per command.
+func defaultDBPath() (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	dir = filepath.Join(dir, "oplbm")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "oplbm.db"), nil
+}
+
+// resolveDB returns the --db flag value or the default path.
+func resolveDB(flagVal string) (string, error) {
+	if flagVal != "" {
+		return flagVal, nil
+	}
+	return defaultDBPath()
 }

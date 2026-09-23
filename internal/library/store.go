@@ -83,6 +83,14 @@ func (s *Store) UpsertItem(it LibraryItem) (LibraryItem, error) {
 	return *existing, nil
 }
 
+// Get returns the item by ID, or nil.
+func (s *Store) Get(id int64) (*LibraryItem, error) {
+	row := s.db.QueryRow(`SELECT id, source_path, content_hash, platform,
+		disc_type, detection_method, title, disc_index, disc_group_id,
+		size_bytes, status FROM library_items WHERE id=?`, id)
+	return scanItem(row)
+}
+
 // GetByHash returns the item with this content hash, or nil.
 func (s *Store) GetByHash(hash string) (*LibraryItem, error) {
 	row := s.db.QueryRow(`SELECT id, source_path, content_hash, platform,
@@ -162,14 +170,18 @@ func (s *Store) RemapGroup(old, new int64) error {
 	return err
 }
 
-// NextGroupID allocates a fresh multi-disc group ID.
+// NextGroupID allocates a fresh multi-disc group ID (always >= 1; 0 and
+// negatives are reserved for absent/temporary).
 func (s *Store) NextGroupID() (int64, error) {
 	var max sql.NullInt64
 	if err := s.db.QueryRow(`SELECT COALESCE(MAX(disc_group_id),0)
 		FROM library_items`).Scan(&max); err != nil {
 		return 0, err
 	}
-	return max.Int64 + 1, nil
+	if id := max.Int64 + 1; id >= 1 {
+		return id, nil
+	}
+	return 1, nil
 }
 
 type rowScanner interface{ Scan(dest ...any) error }

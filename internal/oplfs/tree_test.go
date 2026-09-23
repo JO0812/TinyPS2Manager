@@ -79,6 +79,33 @@ func TestTreePathsErrors(t *testing.T) {
 	}
 }
 
+func TestTreePathsExtraDirs(t *testing.T) {
+	p := &TreePlan{Root: "/mnt/ps2", ExtraDirs: []string{"POPS/SharedVMC", "POPS"}}
+	p.Add(BucketDVD, "", "Game.iso")
+	dirs, _, err := p.Paths()
+	if err != nil {
+		t.Fatalf("Paths: %v", err)
+	}
+	if !contains(dirs, "/mnt/ps2/POPS/SharedVMC") {
+		t.Errorf("dirs = %v", dirs)
+	}
+	// Deduplicated against implied dirs.
+	count := 0
+	for _, d := range dirs {
+		if d == "/mnt/ps2/POPS" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("POPS appears %d times in %v", count, dirs)
+	}
+	bad := &TreePlan{Root: "/mnt/ps2", ExtraDirs: []string{"../evil"}}
+	bad.Add(BucketDVD, "", "Game.iso")
+	if _, _, err := bad.Paths(); err == nil {
+		t.Error("evil extra dir: expected error")
+	}
+}
+
 func TestDiscFolder(t *testing.T) {
 	got, err := DiscFolder("Game (Disc 1).VCD")
 	if err != nil || got != "Game (Disc 1)" {

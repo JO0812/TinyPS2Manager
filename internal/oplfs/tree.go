@@ -47,6 +47,10 @@ type TreePlan struct {
 	Root      string // destination root
 	BDMprefix string // optional subfolder ("" = drive root)
 	Files     []PlannedFile
+	// ExtraDirs are additional directories to create, relative to the
+	// base (e.g. the shared POPS/<vmcdir> VMC folder when it owns no
+	// files of its own).
+	ExtraDirs []string
 }
 
 // Add appends a file to the plan (validated at Paths time).
@@ -115,6 +119,12 @@ func (p *TreePlan) Paths() (dirs, files []string, err error) {
 		// so callers see the full contract.
 		dirSet[filepath.Join(base, string(f.Bucket))] = true
 		fileList = append(fileList, filepath.Join(dir, f.Name))
+	}
+	for _, extra := range p.ExtraDirs {
+		if err := checkPrefix(extra); err != nil {
+			return nil, nil, fmt.Errorf("extra dir: %w", err)
+		}
+		dirSet[filepath.Join(base, extra)] = true
 	}
 	for d := range dirSet {
 		dirs = append(dirs, d)

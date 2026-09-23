@@ -36,6 +36,13 @@ func TestUpsertAndGet(t *testing.T) {
 	if missing, err := st.GetByHash("nope"); err != nil || missing != nil {
 		t.Errorf("missing hash = %+v, %v", missing, err)
 	}
+	gotByID, err := st.Get(it.ID)
+	if err != nil || gotByID == nil || gotByID.ContentHash != "h1" {
+		t.Errorf("Get = %+v, %v", gotByID, err)
+	}
+	if missing, err := st.Get(9999); err != nil || missing != nil {
+		t.Errorf("missing id = %+v, %v", missing, err)
+	}
 }
 
 func TestUpsertPreservesDetection(t *testing.T) {
@@ -138,6 +145,9 @@ func TestListAndGroups(t *testing.T) {
 	g2, _ := st.NextGroupID()
 	if g2 != g1+1 {
 		t.Errorf("group IDs %d then %d, want sequential", g1, g2)
+	}
+	if g1 < 1 {
+		t.Errorf("first group ID = %d, want >= 1", g1)
 	}
 	if err := st.RemapGroup(g1, 99); err != nil {
 		t.Fatal(err)
