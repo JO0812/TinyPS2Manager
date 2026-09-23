@@ -1,9 +1,7 @@
-// Package fsinfo detects destination filesystem type and free space per OS
-// (spec §6.3). Implementations are build-tagged:
-//   - fsinfo_linux.go   — parse /proc/mounts + unix.Statfs
-//   - fsinfo_darwin.go  — getmntinfo via unix.Statfs + diskutil plist fallback
-//   - fsinfo_windows.go — GetVolumeInformationW via golang.org/x/sys/windows
-//
-// A shared stub returns "unknown" for any OS not matched so the caller can
-// fall back to a user-supplied FAT32/exFAT override (spec §6.3).
+// Package fsinfo detects the on-disk filesystem type and free space for a
+// path, one build-tagged implementation per OS. All results flow through
+// Probe, which returns the raw fstype name ("vfat", "exfat", "msdos",
+// "FAT32", …) and free bytes (-1 when unknowable); the caller maps names to
+// transfer.Filesystem. Detection is best-effort by design: unknown results
+// route to the explicit user override (spec §6.3), never to a guess.
 package fsinfo
