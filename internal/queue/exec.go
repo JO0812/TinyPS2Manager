@@ -195,7 +195,7 @@ func (e *Executor) RunDestination(ctx context.Context, destID int64) error {
 		// Queue the next preparation while this job writes.
 		ahead = e.prepareAhead(ctx, destID, job.ID)
 		if outcome.err != nil {
-			e.fail(job, outcome.err)
+			e.fail(job, outcome.err, false)
 			continue
 		}
 		e.executeJob(ctx, dest, job, outcome.work)
@@ -303,10 +303,24 @@ func (e *Executor) prepare(job *Job) (workItem, error) {
 	return w, err
 }
 
-// fail records a job error and auto-pauses the queue (spec §6.4 #7:
-// never skip silently).
-func (e *Executor) fail(job *Job, err error) {
-	_ = e.store.FinishJob(job.ID, err.Error())
+// fail records a job error. Preparation failures (deterministic: bad
+// sources, unreadable serials) park the job immediately — retrying cannot
+// help. Write/verify failures (possibly transient I/O) auto-retry up to
+// MaxAttempts, then park with auto-pause (spec §6.4 #7: never skip
+// silently). Manual Retry always resets the counter.
+func (e *Executor) fail(job *Job, err error, retryable bool) {
+	attempts, aerr := e.store.IncrementAttempts(job.ID)
+	if aerr != nil {
+		_ = e.store.FinishJob(job.ID, err.Error())
+		_ = e.store.SetPaused(true)
+		return
+	}
+	if retryable && attempts < MaxAttempts {
+		if rerr := e.store.RequeueJob(job.ID); rerr == nil {
+			return
+		}
+	}
+	_ = e.store.FinishJob(job.ID, fmt.Sprintf("%s (attempt %d of %d)", err.Error(), attempts, MaxAttempts))
 	_ = e.store.SetPaused(true)
 }
 
@@ -346,7 +360,7 @@ func (e *Executor) executeJob(ctx context.Context, dest *Destination, job *Job, 
 			_ = e.store.RequeueJob(job.ID)
 			return
 		}
-		e.fail(job, runErr)
+		e.fail(job, runErr, true)
 		return
 	}
 	_ = e.store.FinishJob(job.ID, "")

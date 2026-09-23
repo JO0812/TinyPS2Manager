@@ -13,6 +13,38 @@ import (
 //go:embed migrations/001_init.sql
 var migration001 string
 
+// migrateAttempts adds jobs.attempt_count (schema v4), PRAGMA-guarded
+// like migrateCapacity.
+func migrateAttempts(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(jobs)`)
+	if err != nil {
+		return fmt.Errorf("inspect jobs: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == "attempt_count" {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`ALTER TABLE jobs ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return fmt.Errorf("add attempt_count: %w", err)
+	}
+	if _, err := db.Exec(`INSERT OR IGNORE INTO schema_version(version) VALUES (4)`); err != nil {
+		return fmt.Errorf("record schema version: %w", err)
+	}
+	return nil
+}
+
 // lockStaleAfter bounds cross-process lock takeovers: a heartbeat older
 // than this means the holder died without releasing.
 const lockStaleAfter = 60 * time.Second
@@ -48,6 +80,10 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("record schema version: %w", err)
 	}
 	if err := migrateCapacity(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := migrateAttempts(db); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -231,7 +267,7 @@ func validKind(k JobKind) bool {
 // GetJob returns one job, or nil.
 func (s *Store) GetJob(id int64) (*Job, error) {
 	row := s.db.QueryRow(`SELECT id, library_item_id, destination_id, kind,
-		"order", status, phase, bytes_total, bytes_done, error,
+		"order", status, phase, bytes_total, bytes_done, error, attempt_count,
 		created_at, updated_at FROM jobs WHERE id=?`, id)
 	return scanJob(row)
 }
@@ -239,7 +275,7 @@ func (s *Store) GetJob(id int64) (*Job, error) {
 // ListJobs returns all jobs in queue order.
 func (s *Store) ListJobs() ([]Job, error) {
 	rows, err := s.db.Query(`SELECT id, library_item_id, destination_id, kind,
-		"order", status, phase, bytes_total, bytes_done, error,
+		"order", status, phase, bytes_total, bytes_done, error, attempt_count,
 		created_at, updated_at FROM jobs ORDER BY "order"`)
 	if err != nil {
 		return nil, err
@@ -345,15 +381,30 @@ func (s *Store) RequeueJob(id int64) error {
 	return expectOne(res, id, "requeue (done or missing)")
 }
 
-// RetryJob requeues an errored job, clearing its error and progress.
+// RetryJob requeues an errored job, clearing error, progress, and the
+// attempt counter (manual retry always starts fresh).
 func (s *Store) RetryJob(id int64) error {
 	res, err := s.db.Exec(`UPDATE jobs SET status=?, error='', bytes_done=0,
+		attempt_count=0,
 		updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
 		WHERE id=? AND status=?`, string(JobPending), id, string(JobError))
 	if err != nil {
 		return err
 	}
 	return expectOne(res, id, "retry (not in error)")
+}
+
+// IncrementAttempts records one failed try, returning the new count.
+func (s *Store) IncrementAttempts(id int64) (int, error) {
+	if _, err := s.db.Exec(`UPDATE jobs SET attempt_count=attempt_count+1,
+		updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`, id); err != nil {
+		return 0, err
+	}
+	var n int
+	if err := s.db.QueryRow(`SELECT attempt_count FROM jobs WHERE id=?`, id).Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 // PauseJob / ResumeJob flip a pending or errored job's paused state.
@@ -459,7 +510,7 @@ func scanJob(r rowScanner) (*Job, error) {
 	var j Job
 	var kind, status string
 	err := r.Scan(&j.ID, &j.LibraryItemID, &j.DestinationID, &kind,
-		&j.Order, &status, &j.Phase, &j.BytesTotal, &j.BytesDone, &j.Error,
+		&j.Order, &status, &j.Phase, &j.BytesTotal, &j.BytesDone, &j.Error, &j.Attempts,
 		&j.CreatedAt, &j.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil

@@ -33,7 +33,9 @@ const (
 	PhaseDone       = "Done"
 )
 
-// Job is one queued transfer (spec §8).
+// Job is one queued transfer (spec §8). Attempts counts failed tries;
+// the executor auto-retries write-phase failures up to MaxAttempts, then
+// parks the job in error for the user.
 type Job struct {
 	ID            int64
 	LibraryItemID int64
@@ -45,9 +47,14 @@ type Job struct {
 	BytesTotal    int64
 	BytesDone     int64
 	Error         string
+	Attempts      int
 	CreatedAt     string
 	UpdatedAt     string
 }
+
+// MaxAttempts caps automatic retries (plan §6.2); manual Retry resets the
+// counter and always works.
+const MaxAttempts = 3
 
 // DestinationKind distinguishes live drives from staging folders.
 type DestinationKind string
