@@ -26,10 +26,13 @@ type Store struct {
 }
 
 // Open runs pending migrations. path may be ":memory:" for tests.
+// Shared-file discipline with the library package: WAL mode (readers
+// never block the single writer), a 5s busy timeout so cross-pool writers
+// serialize instead of failing, and one connection.
 func Open(path string) (*Store, error) {
 	dsn := path
 	if path != ":memory:" {
-		dsn = fmt.Sprintf("file:%s?_pragma=busy_timeout(5000)", path)
+		dsn = fmt.Sprintf("file:%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)", path)
 	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {

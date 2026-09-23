@@ -81,6 +81,11 @@
   $: dest = destinations.find((d) => d.id === selectedId);
   $: itemIds = items.map((i) => i.id);
 
+  function fsText(d: Destination): string {
+    const base = `${d.filesystem.toUpperCase()} (${formatBytes(d.freeBytes)} free`;
+    return d.totalBytes > 0 ? `${base} of ${formatBytes(d.totalBytes)})` : `${base})`;
+  }
+
   onMount(() => {
     selectedId = Number(localStorage.getItem('oplbm.destId') || '0');
     refresh();
@@ -104,7 +109,7 @@
     {#each destinations as d}
       <button class="drive" class:active={d.id === selectedId} onclick={() => pick(d.id)}>
         <span class="drive-path">{d.path}</span>
-        <span class="pill {(d.fsOverride || d.filesystem) === 'unknown' ? 'pill-gray' : 'pill-green'}">
+        <span class="pill {(d.fsOverride || d.filesystem) === 'unknown' ? 'pill-gray' : 'pill-green'}" title={d.fsOverride ? 'explicit override' : 'detected'}>
           {(d.fsOverride || d.filesystem).toUpperCase()}{d.fsOverride ? '*' : ''}
         </span>
         <span class="muted small">{d.kind}{d.bdmPrefix ? ` · ${d.bdmPrefix}` : ''}</span>
@@ -132,7 +137,7 @@
       <h2>Selected drive</h2>
       <dl>
         <div><dt>Path</dt><dd>{dest.path}</dd></div>
-        <div><dt>Filesystem</dt><dd>{dest.filesystem.toUpperCase()} ({formatBytes(dest.freeBytes)} free{#if dest.totalBytes > 0} of {formatBytes(dest.totalBytes)}{/if})</dd></div>
+        <div><dt>Filesystem</dt><dd>{fsText(dest)}</dd></div>
         <div><dt>Kind</dt><dd>{dest.kind}</dd></div>
       </dl>
       <label>

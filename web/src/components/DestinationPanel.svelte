@@ -8,6 +8,7 @@
 
   $: dest = destinations.find((d) => d.id === selectedId);
   $: fsLabel = dest ? (dest.fsOverride || dest.filesystem).toUpperCase() : '';
+  $: fsKnown = fsLabel !== '' && fsLabel !== 'UNKNOWN';
   $: hasCapacity = !!dest && dest.totalBytes > 0;
   $: used = dest && hasCapacity ? dest.totalBytes - dest.freeBytes : 0;
   $: usedPct = dest && hasCapacity ? Math.min(100, Math.max(0, (used / dest.totalBytes) * 100)) : 0;
@@ -63,7 +64,7 @@
 
   <div class="dest-meta">
     {#if dest}
-      <span class="pill pill-green">{fsLabel || 'UNKNOWN'}</span>
+      <span class="pill {fsKnown ? 'pill-green' : 'pill-gray'}">{fsLabel || 'UNKNOWN'}</span>
     {/if}
   </div>
 </div>

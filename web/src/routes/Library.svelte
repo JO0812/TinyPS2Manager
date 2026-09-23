@@ -68,6 +68,7 @@
     const d = destinations.find((x) => x.id === selectedId);
     return d ? (d.fsOverride || d.filesystem).toUpperCase() : '';
   })();
+  $: fsKnown = fsBadge !== '' && fsBadge !== 'UNKNOWN';
 
   function hotkeys(e: KeyboardEvent) {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
@@ -90,7 +91,7 @@
   <h1 class="view-title">Your game library</h1>
   <div class="title-actions">
     {#if fsBadge}
-      <span class="pill pill-green">{fsBadge}</span>
+      <span class="pill {fsKnown ? 'pill-green' : 'pill-gray'}">{fsBadge}</span>
     {/if}
     <button class="btn-primary" onclick={onGoDrive}>Prepare external drive</button>
   </div>
