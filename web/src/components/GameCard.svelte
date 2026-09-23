@@ -4,6 +4,13 @@
   export let item: LibraryItem;
   export let list: boolean = false;
   export let onChanged: () => void;
+  // Group enqueue: for multi-disc rows this carries every member id so one
+  // click queues the whole set (manifests reference all discs). Per-item
+  // actions (rename, disc type) act on the representative row item.
+  export let groupIds: number[] = [];
+  export let discCount: number = 1;
+
+  $: enqueueIds = groupIds.length > 0 ? groupIds : [item.id];
 
   let menuOpen = false;
   let renaming = false;
@@ -35,7 +42,7 @@
     busy = 'queue';
     error = '';
     try {
-      await api.enqueue(destId, [item.id]);
+      await api.enqueue(destId, enqueueIds);
       onChanged();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -115,6 +122,9 @@
       <span class="title" title={item.title}>{item.title}</span>
       <div class="badges">
         <span class="pill pill-gray">{typeBadge}</span>
+        {#if discCount > 1}
+          <span class="pill pill-purple">{discCount} discs</span>
+        {/if}
         <span class="pill {statusClass(item.status)}">{item.status}</span>
       </div>
     {/if}
@@ -122,7 +132,9 @@
       <button class="dots" onclick={() => (menuOpen = !menuOpen)} aria-label="Game actions">…</button>
       {#if menuOpen}
         <div class="menu">
-          <button onclick={enqueue} disabled={busy !== ''}>Add to queue</button>
+          <button onclick={enqueue} disabled={busy !== ''}>
+            Add to queue{discCount > 1 ? ` (${discCount} discs)` : ''}
+          </button>
           {#if item.platform === 'ps2'}
             <button onclick={() => setType('cd')} disabled={busy !== ''}>Mark as CD</button>
             <button onclick={() => setType('dvd')} disabled={busy !== ''}>Mark as DVD</button>
@@ -190,6 +202,8 @@
   .badges {
     display: flex;
     gap: 6px;
+    flex-wrap: wrap;
+    margin-right: 30px;
   }
   .pill-danger {
     background: var(--danger-soft);

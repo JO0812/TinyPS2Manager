@@ -64,6 +64,27 @@
       if (sort === 'smallest') return a.sizeBytes - b.sizeBytes;
       return a.title.localeCompare(b.title);
     });
+  /** Group rows by multi-disc set (singles stand alone), ordered by title. */
+  $: rows = (() => {
+    const byGroup = new Map<string, LibraryItem[]>();
+    for (const it of filtered) {
+      const key = it.discGroupId != null ? `group-${it.discGroupId}` : `single-${it.id}`;
+      const list = byGroup.get(key) ?? [];
+      list.push(it);
+      byGroup.set(key, list);
+    }
+    return [...byGroup.values()]
+      .map((members) => {
+        const rep = [...members].sort((a, b) => a.discIndex - b.discIndex || a.id - b.id)[0];
+        const bytes = members.reduce((n, m) => n + m.sizeBytes, 0);
+        return { rep, ids: members.map((m) => m.id), count: members.length, bytes };
+      })
+      .sort((a, b) => {
+        if (sort === 'largest') return b.bytes - a.bytes;
+        if (sort === 'smallest') return a.bytes - b.bytes;
+        return a.rep.title.localeCompare(b.rep.title);
+      });
+  })();
   $: fsBadge = (() => {
     const d = destinations.find((x) => x.id === selectedId);
     return d ? (d.fsOverride || d.filesystem).toUpperCase() : '';
@@ -143,7 +164,7 @@
   <button class="btn-ghost" onclick={doImport}>Scan folder</button>
 </div>
 
-<h2 class="section-title">Installed games <span class="muted">{filtered.length}</span></h2>
+<h2 class="section-title">Installed games <span class="muted">{rows.length}</span></h2>
 
 {#if loading}
   <p class="muted">Loading…</p>
@@ -157,14 +178,14 @@
   </div>
 {:else if viewMode === 'grid'}
   <div class="grid">
-    {#each filtered as item (item.id)}
-      <GameCard {item} onChanged={refresh} />
+    {#each rows as row (row.rep.id)}
+      <GameCard item={row.rep} groupIds={row.ids} discCount={row.count} onChanged={refresh} />
     {/each}
   </div>
 {:else}
   <div class="list">
-    {#each filtered as item (item.id)}
-      <GameCard {item} list onChanged={refresh} />
+    {#each rows as row (row.rep.id)}
+      <GameCard item={row.rep} groupIds={row.ids} discCount={row.count} list onChanged={refresh} />
     {/each}
   </div>
 {/if}

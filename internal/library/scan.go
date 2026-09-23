@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -65,6 +66,11 @@ func ScanDir(root string) ([]LibraryItem, error) {
 		items = append(items, it)
 	}
 
+	type candidate struct {
+		item LibraryItem
+		key  string // group key: dir + lowered stripped title
+	}
+	var cands []candidate
 	for _, path := range isos {
 		hash, size, err := ContentHash(path)
 		if err != nil {
@@ -72,30 +78,35 @@ func ScanDir(root string) ([]LibraryItem, error) {
 		}
 		base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 		title, index := splitDiscSuffix(base)
-		// PS2 multi-disc grouping lands in M4; the index is recorded now.
-		add(LibraryItem{
-			SourcePath: path, ContentHash: hash, Platform: PlatformPS2,
-			Title: title, DiscIndex: index, SizeBytes: size, Status: StatusNew,
+		cands = append(cands, candidate{
+			item: LibraryItem{
+				SourcePath: path, ContentHash: hash, Platform: PlatformPS2,
+				Title: title, DiscIndex: index, SizeBytes: size, Status: StatusNew,
+			},
+			key: filepath.Dir(path) + "\x00" + strings.ToLower(title),
 		})
 	}
 
-	type cueItem struct {
-		item LibraryItem
-		key  string // group key: dir + lowered base title
-	}
-	var cueItems []cueItem
 	for _, path := range cues {
 		it, key := scanCue(path)
-		cueItems = append(cueItems, cueItem{it, key})
+		cands = append(cands, candidate{it, key})
 	}
 	groups := map[string][]int{}
-	for i, ci := range cueItems {
+	for i, ci := range cands {
 		groups[ci.key] = append(groups[ci.key], i)
 	}
+	// Sorted keys keep import order (hence new-row IDs) deterministic
+	// across rescans; members keep first-seen walk order.
+	keys := make([]string, 0, len(groups))
+	for k := range groups {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
 	var tmpGroup int64
-	for _, idxs := range groups {
+	for _, k := range keys {
+		idxs := groups[k]
 		if len(idxs) < 2 {
-			add(cueItems[idxs[0]].item)
+			add(cands[idxs[0]].item)
 			continue
 		}
 		// Multi-disc set: real group IDs come from Store.NextGroupID at
@@ -103,7 +114,7 @@ func ScanDir(root string) ([]LibraryItem, error) {
 		// callers can tell grouped items apart before persisting.
 		tmpGroup--
 		for _, i := range idxs {
-			it := cueItems[i].item
+			it := cands[i].item
 			g := tmpGroup
 			it.DiscGroupID = &g
 			add(it)

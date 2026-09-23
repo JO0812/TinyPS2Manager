@@ -25,7 +25,9 @@ func CheckDiscCount(n int) error {
 		return fmt.Errorf("DISCS.TXT needs %d-%d discs, got %d (singles need no manifest)", minDiscs, maxDiscs, n)
 	}
 	if n > maxDiscs {
-		return fmt.Errorf("POPSTARTER supports %d discs, got %d: split into manual reinstall waves", maxDiscs, n)
+		return fmt.Errorf("POPSTARTER swaps at most %d discs in-game, got %d — stage in manual waves: "+
+			"convert discs 1-%d with DISCS.TXT listing those, play through, then replace the POPS set with "+
+			"discs %d-%d (same VMCDIR.TXT so the save carries over)", maxDiscs, n, maxDiscs, maxDiscs+1, n)
 	}
 	return nil
 }

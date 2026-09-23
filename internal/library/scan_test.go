@@ -22,6 +22,8 @@ func buildScanTree(t *testing.T) string {
 	iso := "fake-iso-bytes"
 	writeFile(t, filepath.Join(root, "game.iso"), iso)
 	writeFile(t, filepath.Join(root, "dup", "game-copy.iso"), iso) // deduped
+	writeFile(t, filepath.Join(root, "ps2", "Saga (Disc 1).iso"), "saga-one!!")
+	writeFile(t, filepath.Join(root, "ps2", "Saga (Disc 2).iso"), "saga-two!!")
 	ps1 := filepath.Join(root, "ps1")
 	writeFile(t, filepath.Join(ps1, "d1.bin"), "bin-one!!")
 	writeFile(t, filepath.Join(ps1, "d2.bin"), "bin-two!!")
@@ -48,14 +50,14 @@ func TestScanDir(t *testing.T) {
 	for _, it := range items {
 		byPath[filepath.Base(it.SourcePath)] = it
 	}
-	if len(items) != 6 {
+	if len(items) != 8 {
 		t.Fatalf("got %d items: %v", len(items), items)
 	}
-	iso, ok := byPath["game-copy.iso"]
-	if !ok || iso.Platform != PlatformPS2 || iso.Title != "game-copy" {
+	iso, ok := byPath["game.iso"]
+	if !ok || iso.Platform != PlatformPS2 || iso.Title != "game" {
 		t.Errorf("iso item = %+v", iso)
 	}
-	if _, dup := byPath["game.iso"]; dup {
+	if _, dup := byPath["game-copy.iso"]; dup {
 		t.Error("duplicate content scanned twice")
 	}
 	d1, d2 := byPath["Game (Disc 1).cue"], byPath["Game (Disc 2).cue"]
@@ -70,6 +72,17 @@ func TestScanDir(t *testing.T) {
 	}
 	if d1.DiscIndex != 1 || d2.DiscIndex != 2 {
 		t.Errorf("indices %d,%d, want 1,2", d1.DiscIndex, d2.DiscIndex)
+	}
+	s1, s2 := byPath["Saga (Disc 1).iso"], byPath["Saga (Disc 2).iso"]
+	if s1.Platform != PlatformPS2 || s1.Title != "Saga" {
+		t.Errorf("ps2 disc item = %+v", s1)
+	}
+	if s1.DiscGroupID == nil || s2.DiscGroupID == nil ||
+		*s1.DiscGroupID != *s2.DiscGroupID {
+		t.Errorf("ps2 discs not grouped: %v %v", s1.DiscGroupID, s2.DiscGroupID)
+	}
+	if s1.DiscIndex != 1 || s2.DiscIndex != 2 {
+		t.Errorf("ps2 indices %d,%d, want 1,2", s1.DiscIndex, s2.DiscIndex)
 	}
 	single := byPath["Single.cue"]
 	if single.DiscGroupID != nil || single.SizeBytes != int64(len("bin-single")) {
