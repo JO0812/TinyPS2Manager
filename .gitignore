@@ -13,6 +13,7 @@ testdata/*.db
 
 # Frontend
 /web/node_modules/
+/scripts/uiflow/node_modules/
 /web/dist/*
 !/web/dist/.gitkeep
 /web/.svelte-kit/

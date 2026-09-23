@@ -36,7 +36,10 @@
   }
 
   function setTheme(t: Settings['theme']) {
-    if (settings) settings.theme = t;
+    if (settings) {
+      settings.theme = t;
+      applyTheme(t); // instant feedback; Save persists server-side
+    }
   }
 
   onMount(load);

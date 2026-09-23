@@ -22,6 +22,7 @@ import (
 type apiHarness struct {
 	t      *testing.T
 	server *httptest.Server
+	srv    *Server
 	base   string
 	client *http.Client
 }
@@ -46,7 +47,16 @@ func newAPIHarness(t *testing.T) (*apiHarness, context.CancelFunc) {
 	srv.StartExecutor(ctx)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	return &apiHarness{t: t, server: ts, base: ts.URL, client: ts.Client()}, cancel
+	return &apiHarness{t: t, server: ts, srv: srv, base: ts.URL, client: ts.Client()}, cancel
+}
+
+func (h *apiHarness) setRiptoplBase(t *testing.T, base string) {
+	t.Helper()
+	h.srv.WithRiptoplBase(base)
+}
+
+func (h *apiHarness) qstore() *queue.Store {
+	return h.srv.qstore
 }
 
 func (h *apiHarness) do(method, path string, body any) (int, []byte) {
