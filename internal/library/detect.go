@@ -151,5 +151,5 @@ func serialFor(path string, size int64) (string, error) {
 		return "", err
 	}
 	defer f.Close()
-	return cuebin.ExtractSerial(f, size)
+	return cuebin.ExtractSerial(f, size, 2048) // .iso images are 2048-stride
 }

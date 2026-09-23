@@ -12,32 +12,33 @@ type isoFile struct {
 	content string
 }
 
-// buildTestISO assembles a minimal ISO9660 image: 16 empty sectors, a PVD at
-// sector 16, the root directory at 17, and one sector per file from 18 on.
-func buildTestISO(t *testing.T, files []isoFile) []byte {
+// buildTestISO assembles a minimal ISO9660 image at the given sector stride:
+// 16 empty sectors, a PVD at sector 16, the root directory at 17, and one
+// sector per file from 18 on.
+func buildTestISO(t *testing.T, stride int, files []isoFile) []byte {
 	t.Helper()
-	img := make([]byte, 16*isoSectorSize)
-	pvd := make([]byte, isoSectorSize)
+	img := make([]byte, 16*stride)
+	pvd := make([]byte, stride)
 	pvd[0] = 1
 	copy(pvd[1:6], "CD001")
 	pvd[6] = 1
-	rootRec := appendRecord(nil, 17, isoSectorSize, 2, []byte{0})
+	rootRec := appendRecord(nil, 17, uint32(stride), 2, []byte{0})
 	copy(pvd[156:], rootRec)
 	img = append(img, pvd...)
 
 	root := []byte{}
-	root = appendRecord(root, 17, isoSectorSize, 2, []byte{0})
-	root = appendRecord(root, 17, isoSectorSize, 2, []byte{1})
+	root = appendRecord(root, 17, uint32(stride), 2, []byte{0})
+	root = appendRecord(root, 17, uint32(stride), 2, []byte{1})
 	extent := uint32(18)
 	for _, f := range files {
 		root = appendRecord(root, extent, uint32(len(f.content)), 0, []byte(f.name))
 		extent++
 	}
-	rootPadded := make([]byte, isoSectorSize)
+	rootPadded := make([]byte, stride)
 	copy(rootPadded, root)
 	img = append(img, rootPadded...)
 	for _, f := range files {
-		sec := make([]byte, isoSectorSize)
+		sec := make([]byte, stride)
 		copy(sec, f.content)
 		img = append(img, sec...)
 	}
@@ -65,17 +66,17 @@ func appendRecord(buf []byte, extent, size uint32, flags byte, name []byte) []by
 	return append(buf, rec...)
 }
 
-func extractFromISO(t *testing.T, img []byte) (string, error) {
+func extractFromISO(t *testing.T, img []byte, stride int) (string, error) {
 	t.Helper()
-	return ExtractSerial(bytes.NewReader(img), int64(len(img)))
+	return ExtractSerial(bytes.NewReader(img), int64(len(img)), stride)
 }
 
 func TestExtractSerial(t *testing.T) {
-	img := buildTestISO(t, []isoFile{{
+	img := buildTestISO(t, 2048, []isoFile{{
 		"SYSTEM.CNF;1",
 		"BOOT = cdrom:\\SCUS_945.67;1\nTCB = 4\nEVENT = 10\nSTACK = 801FFF00\n",
 	}})
-	got, err := extractFromISO(t, img)
+	got, err := extractFromISO(t, img, 2048)
 	if err != nil {
 		t.Fatalf("ExtractSerial: %v", err)
 	}
@@ -85,16 +86,35 @@ func TestExtractSerial(t *testing.T) {
 }
 
 func TestExtractSerialLowercase(t *testing.T) {
-	img := buildTestISO(t, []isoFile{{
+	img := buildTestISO(t, 2048, []isoFile{{
 		"SYSTEM.CNF;1",
 		"boot = cdrom:\\slus_123.45;1\n",
 	}})
-	got, err := extractFromISO(t, img)
+	got, err := extractFromISO(t, img, 2048)
 	if err != nil {
 		t.Fatalf("ExtractSerial: %v", err)
 	}
 	if got != "SLUS_123.45" {
 		t.Errorf("serial = %q, want SLUS_123.45", got)
+	}
+}
+
+func TestExtractSerialRawTrack(t *testing.T) {
+	// Raw BIN track data is 2352-stride: the same structures at wider offsets.
+	img := buildTestISO(t, 2352, []isoFile{{
+		"SYSTEM.CNF;1",
+		"BOOT = cdrom:\\SCUS_945.67;1\n",
+	}})
+	got, err := extractFromISO(t, img, 2352)
+	if err != nil {
+		t.Fatalf("ExtractSerial: %v", err)
+	}
+	if got != "SCUS_945.67" {
+		t.Errorf("serial = %q, want SCUS_945.67", got)
+	}
+	// A 2352 image read at the wrong stride must not silently succeed.
+	if _, err := extractFromISO(t, img, 2048); err == nil {
+		t.Error("wrong stride: expected error, got nil")
 	}
 }
 
@@ -105,24 +125,29 @@ func TestExtractSerialErrors(t *testing.T) {
 		want string
 	}{
 		"missing cnf": {
-			buildTestISO(t, []isoFile{{"OTHER.DAT;1", "x"}}),
+			buildTestISO(t, 2048, []isoFile{{"OTHER.DAT;1", "x"}}),
 			"not found",
 		},
 		"no boot entry": {
-			buildTestISO(t, []isoFile{{"SYSTEM.CNF;1", "TCB = 4\n"}}),
+			buildTestISO(t, 2048, []isoFile{{"SYSTEM.CNF;1", "TCB = 4\n"}}),
 			"no BOOT entry",
 		},
 		"boot without serial": {
-			buildTestISO(t, []isoFile{{"SYSTEM.CNF;1", "BOOT = cdrom:\\;1\n"}}),
+			buildTestISO(t, 2048, []isoFile{{"SYSTEM.CNF;1", "BOOT = cdrom:\\;1\n"}}),
 			"no disc serial",
 		},
 		"not iso":     {make([]byte, 64<<10), "no ISO9660"},
 		"truncated":   {make([]byte, 100), "too small"},
 		"empty image": {nil, "too small"},
+		"bad stride":  {make([]byte, 64<<10), "bad sector size"},
 	}
 	_ = full
 	for name, tc := range cases {
-		if _, err := extractFromISO(t, tc.img); err == nil {
+		stride := 2048
+		if name == "bad stride" {
+			stride = 1000
+		}
+		if _, err := extractFromISO(t, tc.img, stride); err == nil {
 			t.Errorf("%s: expected error, got nil", name)
 		} else if !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: error %q lacks %q", name, err, tc.want)

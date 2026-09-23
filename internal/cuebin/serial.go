@@ -8,13 +8,11 @@ import (
 	"strings"
 )
 
-// ISO9660 geometry used for serial extraction.
+// isoMaxCNFRead caps the SYSTEM.CNF read: the file is tiny by definition.
 const (
-	isoSectorSize   = 2048
-	isoPVDSector    = 16
-	isoMaxCNFRead   = 64 << 10 // SYSTEM.CNF is tiny; cap the read
-	serialPattern   = `^[A-Z]{4}_[0-9]{3}\.[0-9]{2}$`
-	bootSerialFind  = `\\([A-Za-z]{4}_[0-9]{3}\.[0-9]{2})`
+	isoMaxCNFRead = 64 << 10
+	serialPattern = `^[A-Z]{4}_[0-9]{3}\.[0-9]{2}$`
+	bootSerialFind = `\\([A-Za-z]{4}_[0-9]{3}\.[0-9]{2})`
 )
 
 var (
@@ -22,17 +20,22 @@ var (
 	bootSerial  = regexp.MustCompile(bootSerialFind)
 )
 
-// ExtractSerial reads the PS1 disc serial (e.g. SCUS_945.67) from the data
-// track image via its SYSTEM.CNF BOOT entry (spec §2.4: "extractable from
-// the CUE/system area"). r is the raw track image (typically track 1's BIN
-// region); only the PVD, the root directory, and the first 64 KiB of
+// ExtractSerial reads the PS1 disc serial (e.g. SCUS_945.67) from a track
+// image via its SYSTEM.CNF BOOT entry (spec §2.4: "extractable from the
+// CUE/system area"). sectorSize is the image stride: 2048 for .iso files,
+// 2352 for raw BIN track data (ISO structures live at stride multiples in
+// both layouts). Only the PVD, the root directory, and the first 64 KiB of
 // SYSTEM.CNF are read — the image is never loaded.
-func ExtractSerial(r io.ReaderAt, size int64) (string, error) {
-	pvdOff := int64(isoPVDSector * isoSectorSize)
-	if size < pvdOff+isoSectorSize {
+func ExtractSerial(r io.ReaderAt, size int64, sectorSize int) (string, error) {
+	if sectorSize != 2048 && sectorSize != 2352 {
+		return "", fmt.Errorf("bad sector size %d", sectorSize)
+	}
+	ss := int64(sectorSize)
+	pvdOff := 16 * ss
+	if size < pvdOff+ss {
 		return "", fmt.Errorf("image too small for ISO9660 PVD (%d bytes)", size)
 	}
-	pvd := make([]byte, isoSectorSize)
+	pvd := make([]byte, ss)
 	if _, err := r.ReadAt(pvd, pvdOff); err != nil {
 		return "", fmt.Errorf("read PVD: %w", err)
 	}
@@ -43,12 +46,12 @@ func ExtractSerial(r io.ReaderAt, size int64) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("bad root directory record: %w", err)
 	}
-	cnf, err := findFile(r, size, root, "SYSTEM.CNF;1")
+	cnf, err := findFile(r, size, root, ss, "SYSTEM.CNF;1")
 	if err != nil {
 		return "", err
 	}
 	content := make([]byte, min64(cnf.size, isoMaxCNFRead))
-	if _, err := r.ReadAt(content, int64(cnf.extent)*isoSectorSize); err != nil &&
+	if _, err := r.ReadAt(content, int64(cnf.extent)*ss); err != nil &&
 		err != io.EOF {
 		return "", fmt.Errorf("read SYSTEM.CNF: %w", err)
 	}
@@ -78,9 +81,10 @@ func parseDirRecord(hdr []byte) (dirExtent, error) {
 }
 
 // findFile scans a directory extent for name and returns its location.
-func findFile(r io.ReaderAt, imgSize int64, dir dirExtent, name string) (dirExtent, error) {
-	end := int64(dir.extent)*isoSectorSize + dir.size
-	for off := int64(dir.extent) * isoSectorSize; off < end; {
+// stride is the image sector size (2048 or 2352).
+func findFile(r io.ReaderAt, imgSize int64, dir dirExtent, stride int64, name string) (dirExtent, error) {
+	end := int64(dir.extent)*stride + dir.size
+	for off := int64(dir.extent) * stride; off < end; {
 		hdr := make([]byte, 34)
 		if _, err := r.ReadAt(hdr, off); err != nil {
 			return dirExtent{}, fmt.Errorf("read dir record: %w", err)
@@ -88,7 +92,7 @@ func findFile(r io.ReaderAt, imgSize int64, dir dirExtent, name string) (dirExte
 		recLen := int(hdr[0])
 		if recLen == 0 {
 			// Padding to the next sector.
-			off = (off/isoSectorSize + 1) * isoSectorSize
+			off = (off/stride + 1) * stride
 			continue
 		}
 		if recLen < 34 {
@@ -107,7 +111,7 @@ func findFile(r io.ReaderAt, imgSize int64, dir dirExtent, name string) (dirExte
 			return dirExtent{}, fmt.Errorf("read record name: %w", err)
 		}
 		if string(nameBuf) == name {
-			if int64(loc.extent)*isoSectorSize+loc.size > imgSize {
+			if int64(loc.extent)*stride+loc.size > imgSize {
 				return dirExtent{}, fmt.Errorf("%s extends past image end", name)
 			}
 			return loc, nil
