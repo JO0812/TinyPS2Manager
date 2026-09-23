@@ -1,0 +1,30 @@
+# Go build output
+/bin/
+/dist/
+*.exe
+*.test
+
+# SQLite test files
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+testdata/*.db
+
+# Frontend
+/web/node_modules/
+/web/dist/
+/web/.svelte-kit/
+
+# Wails build output
+/build/
+
+# Editor noise
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Local config overrides
+.oplbm.env
