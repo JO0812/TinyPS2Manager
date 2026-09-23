@@ -157,3 +157,31 @@ func TestListAndGroups(t *testing.T) {
 		t.Errorf("remap failed: %+v", got)
 	}
 }
+
+func TestListByGroupID(t *testing.T) {
+	st := openTestStore(t)
+	g := int64(7)
+	if _, err := st.UpsertItem(LibraryItem{SourcePath: "/a", ContentHash: "a",
+		Platform: PlatformPS1, Title: "G", DiscIndex: 2, DiscGroupID: &g}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpsertItem(LibraryItem{SourcePath: "/b", ContentHash: "b",
+		Platform: PlatformPS1, Title: "G", DiscIndex: 1, DiscGroupID: &g}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpsertItem(LibraryItem{SourcePath: "/c", ContentHash: "c",
+		Platform: PlatformPS1, Title: "Solo"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.ListByGroupID(7)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("group = %v, %v", got, err)
+	}
+	if got[0].DiscIndex != 1 || got[1].DiscIndex != 2 {
+		t.Errorf("order = %+v", got)
+	}
+	empty, err := st.ListByGroupID(999)
+	if err != nil || len(empty) != 0 {
+		t.Errorf("missing group = %v, %v", empty, err)
+	}
+}

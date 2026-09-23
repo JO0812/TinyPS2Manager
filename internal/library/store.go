@@ -162,6 +162,27 @@ func (s *Store) List() ([]LibraryItem, error) {
 	return out, rows.Err()
 }
 
+// ListByGroupID returns all items sharing a multi-disc group, ordered by
+// disc index.
+func (s *Store) ListByGroupID(groupID int64) ([]LibraryItem, error) {
+	rows, err := s.db.Query(`SELECT id, source_path, content_hash, platform,
+		disc_type, detection_method, title, disc_index, disc_group_id,
+		size_bytes, status FROM library_items WHERE disc_group_id=? ORDER BY disc_index, id`, groupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []LibraryItem
+	for rows.Next() {
+		it, err := scanItem(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *it)
+	}
+	return out, rows.Err()
+}
+
 // RemapGroup rewrites a temporary scan-time group ID to a real one
 // (see ScanDir; the M1 CLI persist step allocates via NextGroupID).
 func (s *Store) RemapGroup(old, new int64) error {

@@ -203,6 +203,28 @@ func (s *Store) ListJobs() ([]Job, error) {
 	return out, rows.Err()
 }
 
+// PeekPending returns the lowest-order pending job for a destination
+// WITHOUT claiming it, so the executor can prepare it in the background
+// while the current job writes. The claim still goes through NextPending,
+// which skips per-job paused entries and races safely.
+func (s *Store) PeekPending(destinationID int64) (job *Job, ok bool, err error) {
+	var id int64
+	err = s.db.QueryRow(`SELECT id FROM jobs
+		WHERE destination_id=? AND status=? ORDER BY "order" LIMIT 1`,
+		destinationID, string(JobPending)).Scan(&id)
+	if err == sql.ErrNoRows {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	job, err = s.GetJob(id)
+	if err != nil || job == nil {
+		return nil, false, err
+	}
+	return job, true, nil
+}
+
 // NextPending claims the lowest-order pending job for a destination,
 // skipping per-job paused entries. ok=false when the queue is dry. The
 // UPDATE is atomic: two executors racing claim different rows.
@@ -256,6 +278,18 @@ func (s *Store) FinishJob(id int64, jobErr string) error {
 		updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
 		status, "", jobErr, id)
 	return err
+}
+
+// RequeueJob returns a job to pending, clearing error and progress
+// (post-cancel restart; crash-recovered running jobs).
+func (s *Store) RequeueJob(id int64) error {
+	res, err := s.db.Exec(`UPDATE jobs SET status=?, phase='', error='',
+		bytes_done=0, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		WHERE id=? AND status!=?`, string(JobPending), id, string(JobDone))
+	if err != nil {
+		return err
+	}
+	return expectOne(res, id, "requeue (done or missing)")
 }
 
 // RetryJob requeues an errored job, clearing its error and progress.

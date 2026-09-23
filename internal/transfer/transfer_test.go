@@ -164,3 +164,75 @@ func TestCtxReaderStops(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestStageFileCommit(t *testing.T) {
+	d := FileDisk{}
+	dir := t.TempDir()
+	st, err := d.StageFile(dir, "game.iso")
+	if err != nil {
+		t.Fatalf("StageFile: %v", err)
+	}
+	// Temp is invisible under the final name until commit.
+	if _, serr := os.Stat(filepath.Join(dir, "game.iso")); !os.IsNotExist(serr) {
+		t.Fatal("final visible before commit")
+	}
+	if _, err := st.Write([]byte("data")); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	back, err := os.ReadFile(filepath.Join(dir, "game.iso"))
+	if err != nil || string(back) != "data" {
+		t.Errorf("readback = %q, %v", back, err)
+	}
+	leftovers, _ := filepath.Glob(filepath.Join(dir, ".oplbm.*"))
+	if len(leftovers) != 0 {
+		t.Errorf("temp survives commit: %v", leftovers)
+	}
+}
+
+func TestStageFileAbort(t *testing.T) {
+	d := FileDisk{}
+	dir := t.TempDir()
+	st, err := d.StageFile(dir, "game.iso")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Write([]byte("partial"))
+	st.Abort()
+	st.Abort() // idempotent
+	if _, serr := os.Stat(filepath.Join(dir, "game.iso")); !os.IsNotExist(serr) {
+		t.Error("final exists after abort")
+	}
+	leftovers, _ := filepath.Glob(filepath.Join(dir, ".oplbm.*"))
+	if len(leftovers) != 0 {
+		t.Errorf("temp survives abort: %v", leftovers)
+	}
+}
+
+func TestSweepStaleTemps(t *testing.T) {
+	d := FileDisk{}
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "sub")
+	os.MkdirAll(sub, 0o755)
+	for _, p := range []string{
+		filepath.Join(dir, ".oplbm.12345"),
+		filepath.Join(sub, ".oplbm.67890.vcd"),
+	} {
+		if err := os.WriteFile(p, []byte("stale"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	keep := filepath.Join(dir, "game.iso")
+	if err := os.WriteFile(keep, []byte("real"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	n, err := d.SweepStaleTemps(dir)
+	if err != nil || n != 2 {
+		t.Errorf("sweep = %d, %v", n, err)
+	}
+	if _, serr := os.Stat(keep); serr != nil {
+		t.Error("real file swept")
+	}
+}
