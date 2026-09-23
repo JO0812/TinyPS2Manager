@@ -34,6 +34,8 @@ Wails builds (once wired): `wails build -platform windows/amd64` etc.
 ```
 go test ./...                       # unit + integration
 go test -tags=genfixtures ./testdata # regenerate synthetic fixtures
+scripts/e2e.sh                      # full bootup: CLI + API + browser UI flows
+                                    # (UI flows skip gracefully without node/Chromium)
 ```
 
 ## Key constraints (do not violate)

@@ -1,0 +1,14 @@
+{
+  "name": "oplbm-uiflow",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Browser-driven behavioral tests for the oplbm UI (dev/QA only, never shipped).",
+  "type": "commonjs",
+  "scripts": {
+    "flow": "node flow.js",
+    "shots": "node shot.js"
+  },
+  "dependencies": {
+    "puppeteer-core": "^24.0.0"
+  }
+}
