@@ -70,13 +70,16 @@ Work items, ordered:
    `cmd/oplbm/`, `internal/{library,isotool,cuebin,usbextreme,oplfs,queue,transfer,api,config}/`
    (M1–M4) and `internal/{riptopl,art,cheats}/` (M5 — stubs now, implemented in M5).
    `web/`, `testdata/`, `scripts/`. No `docs/` (single source of truth: this file + SPEC).
-4. Add pinned dependency list (write to `go.mod` via `go get`):
+4. Add pinned dependency list (`tools.go` with `//go:build tools` blank imports
+   so `go mod tidy` retains the pins):
    - `modernc.org/sqlite` (pure-Go SQLite; still required under Wails)
    - `golang.org/x/sys` (per-OS fs info)
-   - `github.com/wailsapp/wails/v2` (Q4 — wrapped desktop app)
    - `github.com/go-chi/chi/v5` for routing inside the Wails app.
    - WS: use SSE behind Wails instead of WebSocket — simpler with the embedded
      server (no WS upgrade needed); pick one and stick to it (SSE).
+   - `wails` library import deferred to M2/M3 (needs cgo/webview; would break
+     the pure-Go cross-build matrix with nothing to wire it to yet). Wails CLI
+     v2.16.0 installed as a dev tool via `go install .../cmd/wails@latest`.
    - Validate *nothing* else is pulled in; reopen if a package introduces cgo.
 5. Add CI scaffolding (`.github/workflows/ci.yml`):
    - `go vet`, `go test ./...`, `go build ./...`
@@ -88,7 +91,12 @@ Work items, ordered:
    auto-run them (per opencode instructions).
 
 Exit criteria: empty-binary build works on all 5 GOOS/GOARCH combos, CI green,
-skeleton compiles with stub packages, `wails doctor` passes on dev host.
+skeleton compiles with stub packages, `wails doctor` passes on dev host
+(requires `libwebkit2gtk-4.1-dev` on Linux — needs root; install with
+`sudo apt install libwebkit2gtk-4.1-dev`. Status 2026-09-23: all doctor checks
+green except libwebkit Not Found; Wails CLI v2.16.0 installed. Wails builds are
+covered by CI per §6.4, so this blocks only local `wails dev`/`wails build`
+on Linux, not the milestone).
 
 ---
 
