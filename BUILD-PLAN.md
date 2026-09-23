@@ -466,7 +466,11 @@ afterwards (spec §9.7). Pure-Go HTTP via stdlib only; add no new module depende
 1. Release client: fetch the unified `RIPTOPL-<version>.zip` asset list for a tag (`rolling` or a
    preserved tag); select `APP_RIPTOPL-PS2DEVPINNED/RIPTOPL.ELF`, else next labelled flavour in
    documented order. Stream-download with progress reporting into staging; SHA-256 recorded.
-2. Placement: `APPS/RIPTOPL/RIPTOPL.ELF` under root-or-prefix via `oplfs` (reuses tree builder).
+2. Placement: `APPS/APP_RIPTOPL-<FLAVOUR>/RIPTOPL.ELF` under root-or-prefix,
+   mirroring the package verbatim (verified Sept 2026 against the live
+   releases: the package ships `APPS/APP_RIPTOPL-*/` flavour dirs, not a
+   bare `APPS/RIPTOPL/`; renaming would orphan the .psu shortcuts and
+   guides). Default tag `current-fan-favorite` (stable), `rolling` opt-in.
 3. First-boot checklist generator: returns the ordered manual steps (enable USB in Game Sources →
    start mode → Save Changes → L3 for PS1) rendered by the UI as a per-destination checklist.
    The app never pretends the drive is ready before this.
