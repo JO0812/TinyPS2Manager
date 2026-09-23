@@ -44,7 +44,43 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("record schema version: %w", err)
 	}
+	if err := migrateCapacity(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return &Store{db: db}, nil
+}
+
+// migrateCapacity adds destinations.total_bytes (schema v3). SQLite has no
+// idempotent ADD COLUMN, so the PRAGMA guard keeps Open re-runnable.
+func migrateCapacity(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(destinations)`)
+	if err != nil {
+		return fmt.Errorf("inspect destinations: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == "total_bytes" {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`ALTER TABLE destinations ADD COLUMN total_bytes INTEGER NOT NULL DEFAULT -1`); err != nil {
+		return fmt.Errorf("add total_bytes: %w", err)
+	}
+	if _, err := db.Exec(`INSERT OR IGNORE INTO schema_version(version) VALUES (3)`); err != nil {
+		return fmt.Errorf("record schema version: %w", err)
+	}
+	return nil
 }
 
 // Close releases the database.
@@ -61,9 +97,9 @@ func (s *Store) AddDestination(d Destination) (Destination, error) {
 		return Destination{}, fmt.Errorf("bad destination kind %q", d.Kind)
 	}
 	res, err := s.db.Exec(`INSERT INTO destinations
-		(path, kind, filesystem, fs_override, bdm_prefix, free_bytes)
-		VALUES (?,?,?,?,?,?)`,
-		d.Path, string(d.Kind), d.Filesystem, d.FSOverride, d.BDMPrefix, d.FreeBytes)
+		(path, kind, filesystem, fs_override, bdm_prefix, free_bytes, total_bytes)
+		VALUES (?,?,?,?,?,?,?)`,
+		d.Path, string(d.Kind), d.Filesystem, d.FSOverride, d.BDMPrefix, d.FreeBytes, d.TotalBytes)
 	if err != nil {
 		return Destination{}, err
 	}
@@ -78,14 +114,14 @@ func (s *Store) AddDestination(d Destination) (Destination, error) {
 // GetDestination returns one target, or nil.
 func (s *Store) GetDestination(id int64) (*Destination, error) {
 	row := s.db.QueryRow(`SELECT id, path, kind, filesystem, fs_override,
-		bdm_prefix, free_bytes, updated_at FROM destinations WHERE id=?`, id)
+		bdm_prefix, free_bytes, total_bytes, updated_at FROM destinations WHERE id=?`, id)
 	return scanDestination(row)
 }
 
 // ListDestinations returns all targets in insertion order.
 func (s *Store) ListDestinations() ([]Destination, error) {
 	rows, err := s.db.Query(`SELECT id, path, kind, filesystem, fs_override,
-		bdm_prefix, free_bytes, updated_at FROM destinations ORDER BY id`)
+		bdm_prefix, free_bytes, total_bytes, updated_at FROM destinations ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -123,10 +159,10 @@ func (s *Store) UpdateDestinationOverride(id int64, override string) error {
 }
 
 // RefreshDestinationStats records freshly probed filesystem/free space.
-func (s *Store) RefreshDestinationStats(id int64, filesystem string, freeBytes int64) error {
-	_, err := s.db.Exec(`UPDATE destinations SET filesystem=?, free_bytes=?,
+func (s *Store) RefreshDestinationStats(id int64, filesystem string, freeBytes, totalBytes int64) error {
+	_, err := s.db.Exec(`UPDATE destinations SET filesystem=?, free_bytes=?, total_bytes=?,
 		updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
-		filesystem, freeBytes, id)
+		filesystem, freeBytes, totalBytes, id)
 	return err
 }
 
@@ -134,7 +170,7 @@ func scanDestination(r rowScanner) (*Destination, error) {
 	var d Destination
 	var kind string
 	err := r.Scan(&d.ID, &d.Path, &kind, &d.Filesystem, &d.FSOverride,
-		&d.BDMPrefix, &d.FreeBytes, &d.UpdatedAt)
+		&d.BDMPrefix, &d.FreeBytes, &d.TotalBytes, &d.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

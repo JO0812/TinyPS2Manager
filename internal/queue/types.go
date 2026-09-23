@@ -68,6 +68,7 @@ type Destination struct {
 	FSOverride string
 	BDMPrefix  string
 	FreeBytes  int64
+	TotalBytes int64
 	UpdatedAt  string
 }
 

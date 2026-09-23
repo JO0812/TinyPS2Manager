@@ -41,12 +41,15 @@ tmpfs /tmp tmpfs rw 0 0
 }
 
 func TestProbeLive(t *testing.T) {
-	ft, free, err := Probe(t.TempDir())
+	ft, free, total, err := Probe(t.TempDir())
 	if err != nil {
 		t.Fatalf("Probe: %v", err)
 	}
 	if free <= 0 {
 		t.Errorf("free = %d", free)
 	}
-	t.Logf("fstype=%q free=%d", ft, free)
+	if total <= 0 || total < free {
+		t.Errorf("total = %d, free = %d", total, free)
+	}
+	t.Logf("fstype=%q free=%d total=%d", ft, free, total)
 }

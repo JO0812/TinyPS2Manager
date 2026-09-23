@@ -167,6 +167,7 @@ type destinationJSON struct {
 	FSOverride string `json:"fsOverride"`
 	BDMPrefix  string `json:"bdmPrefix"`
 	FreeBytes  int64  `json:"freeBytes"`
+	TotalBytes int64  `json:"totalBytes"`
 	UpdatedAt  string `json:"updatedAt"`
 }
 
@@ -174,6 +175,6 @@ func toDestinationJSON(d queue.Destination) destinationJSON {
 	return destinationJSON{
 		ID: d.ID, Path: d.Path, Kind: string(d.Kind), Filesystem: d.Filesystem,
 		FSOverride: d.FSOverride, BDMPrefix: d.BDMPrefix,
-		FreeBytes: d.FreeBytes, UpdatedAt: d.UpdatedAt,
+		FreeBytes: d.FreeBytes, TotalBytes: d.TotalBytes, UpdatedAt: d.UpdatedAt,
 	}
 }

@@ -57,7 +57,7 @@
 
   <main>
     {#if view === 'library'}
-      <Library />
+      <Library onGoDrive={() => (view = 'drive')} />
     {:else if view === 'activity'}
       <Activity />
     {:else if view === 'drive'}

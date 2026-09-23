@@ -37,6 +37,7 @@ export interface Destination {
   fsOverride: string;
   bdmPrefix: string;
   freeBytes: number;
+  totalBytes: number;
   updatedAt: string;
 }
 

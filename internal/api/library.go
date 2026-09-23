@@ -151,8 +151,8 @@ func (s *Server) handleDestinationsList(w http.ResponseWriter, r *http.Request) 
 	for _, d := range dests {
 		probed, err := transfer.Probe(d.Path)
 		if err == nil {
-			_ = s.qstore.RefreshDestinationStats(d.ID, string(probed.Filesystem), probed.FreeBytes)
-			d.Filesystem, d.FreeBytes = string(probed.Filesystem), probed.FreeBytes
+			_ = s.qstore.RefreshDestinationStats(d.ID, string(probed.Filesystem), probed.FreeBytes, probed.TotalBytes)
+			d.Filesystem, d.FreeBytes, d.TotalBytes = string(probed.Filesystem), probed.FreeBytes, probed.TotalBytes
 		}
 		out = append(out, toDestinationJSON(d))
 	}
@@ -199,7 +199,7 @@ func (s *Server) handleDestinationsCreate(w http.ResponseWriter, r *http.Request
 	d, err := s.qstore.AddDestination(queue.Destination{
 		Path: body.Path, Kind: kind, Filesystem: string(probed.Filesystem),
 		FSOverride: body.FilesystemOverride, BDMPrefix: body.BDMPrefix,
-		FreeBytes: probed.FreeBytes,
+		FreeBytes: probed.FreeBytes, TotalBytes: probed.TotalBytes,
 	})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "", err.Error())

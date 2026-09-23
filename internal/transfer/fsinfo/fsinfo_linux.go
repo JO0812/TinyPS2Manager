@@ -12,22 +12,22 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Probe returns the raw fstype of path's mount and its free bytes.
-func Probe(path string) (fstype string, freeBytes int64, err error) {
+// Probe returns the raw fstype of path's mount, free bytes, and total
+// bytes (-1 each when unknowable).
+func Probe(path string) (fstype string, freeBytes, totalBytes int64, err error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
-		return "", -1, err
+		return "", -1, -1, err
 	}
-	mount, fstype, err := mountFor(abs)
+	_, fstype, err = mountFor(abs)
 	if err != nil {
-		return "", -1, err
+		return "", -1, -1, err
 	}
-	_ = mount
 	var st unix.Statfs_t
 	if err := unix.Statfs(abs, &st); err != nil {
-		return fstype, -1, nil // type known, space not
+		return fstype, -1, -1, nil // type known, space not
 	}
-	return fstype, int64(st.Bavail) * int64(st.Bsize), nil
+	return fstype, int64(st.Bavail) * int64(st.Bsize), int64(st.Blocks) * int64(st.Bsize), nil
 }
 
 // mountFor finds the longest-prefix mount point of path in /proc/mounts.

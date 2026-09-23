@@ -15,23 +15,25 @@ const (
 	FSUnknown Filesystem = "unknown"
 )
 
-// Probed is a live destination reading: effective filesystem + free bytes
-// (-1 when unknowable — callers skip the space check then, never block on it).
+// Probed is a live destination reading: effective filesystem, free bytes,
+// and total bytes (-1 each when unknowable — callers skip the space check
+// then, never block on it).
 type Probed struct {
 	Filesystem Filesystem
 	FreeBytes  int64
+	TotalBytes int64
 }
 
-// Probe detects path's filesystem and free space. Raw names map
+// Probe detects path's filesystem, free space, and capacity. Raw names map
 // case-insensitively; "msdos" (FAT12/16/32) folds to fat32 as a documented
 // approximation — FAT12/16 sticks are rare and the explicit user override
 // corrects any misfire.
 func Probe(path string) (Probed, error) {
-	raw, free, err := fsinfo.Probe(path)
+	raw, free, total, err := fsinfo.Probe(path)
 	if err != nil {
-		return Probed{Filesystem: FSUnknown, FreeBytes: -1}, nil
+		return Probed{Filesystem: FSUnknown, FreeBytes: -1, TotalBytes: -1}, nil
 	}
-	return Probed{Filesystem: mapFilesystem(raw), FreeBytes: free}, nil
+	return Probed{Filesystem: mapFilesystem(raw), FreeBytes: free, TotalBytes: total}, nil
 }
 
 func mapFilesystem(raw string) Filesystem {

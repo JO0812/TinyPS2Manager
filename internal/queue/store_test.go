@@ -34,11 +34,11 @@ func TestDestinationCRUD(t *testing.T) {
 	if err := st.UpdateDestinationPrefix(d.ID, "X"); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.RefreshDestinationStats(d.ID, "fat32", 99); err != nil {
+	if err := st.RefreshDestinationStats(d.ID, "fat32", 99, 200); err != nil {
 		t.Fatal(err)
 	}
 	got, _ = st.GetDestination(d.ID)
-	if got.BDMPrefix != "X" || got.Filesystem != "fat32" || got.FreeBytes != 99 {
+	if got.BDMPrefix != "X" || got.Filesystem != "fat32" || got.FreeBytes != 99 || got.TotalBytes != 200 {
 		t.Errorf("refresh = %+v", got)
 	}
 	// Override wins over detection.
