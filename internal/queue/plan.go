@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -242,7 +243,7 @@ func planConvert(item *library.LibraryItem, dest *Destination, lib *library.Stor
 		return nil, err
 	}
 	serial := serialFromMerge(binDir, merge)
-	vcdName := cuebin.VCDFileName(serial, item.Title)
+	vcdName := groupedVCDName(item, serial, 1)
 	popsDir := filepath.Join(dest.Path, dest.BDMPrefix, string(oplfs.BucketPOPS))
 	p := &convertPlan{
 		sheet: sheet, binDir: binDir, binSizes: sizes, merge: merge,
@@ -260,16 +261,20 @@ func planConvert(item *library.LibraryItem, dest *Destination, lib *library.Stor
 	if err := oplfs.CheckDiscCount(len(siblings)); err != nil {
 		return nil, err
 	}
-	// Order by disc index; collect every disc's VCD name.
+	// Order by disc index; collect every disc's VCD name. The item's own
+	// VCD name is re-derived here so manifests and output agree exactly.
 	ordered := append([]library.LibraryItem{}, siblings...)
 	sortByDiscIndex(ordered)
 	vcds := make([]string, 0, len(ordered))
-	for _, sib := range ordered {
-		name, err := siblingVCDName(&sib)
+	for i := range ordered {
+		name, err := siblingVCDName(&ordered[i], i+1)
 		if err != nil {
 			return nil, err
 		}
 		vcds = append(vcds, name)
+		if ordered[i].ID == item.ID {
+			p.vcdName = name
+		}
 	}
 	set := oplfs.MultiDiscSet{VCDs: vcds, VMCDir: vmcDirFor(ordered, vcds)}
 	if err := set.Validate(); err != nil {
@@ -284,8 +289,8 @@ func planConvert(item *library.LibraryItem, dest *Destination, lib *library.Stor
 		return nil, err
 	}
 	seenDirs := map[string]bool{}
-	for _, sib := range ordered {
-		folder, _ := oplfs.DiscFolder(vcdNameOf(sib, vcds, ordered))
+	for i := range ordered {
+		folder, _ := oplfs.DiscFolder(vcds[i]) // validated above
 		dir := filepath.Join(popsDir, folder)
 		p.manifests = append(p.manifests,
 			manifestFile{dir: dir, name: "DISCS.TXT", content: discs},
@@ -313,18 +318,33 @@ func sortByDiscIndex(items []library.LibraryItem) {
 	})
 }
 
-// vcdNameOf pairs an ordered sibling with its precomputed VCD name.
-func vcdNameOf(sib library.LibraryItem, vcds []string, ordered []library.LibraryItem) string {
-	for i := range ordered {
-		if ordered[i].ID == sib.ID {
-			return vcds[i]
+// discSuffixTail detects an existing disc marker so grouped naming never
+// stacks "(Disc N) (Disc N)".
+var discSuffixTail = regexp.MustCompile(`(?i)[\s_\-]+[\(\[]?(disc|disk|cd)\s*\d+[\)\]]?\s*$`)
+
+// groupedVCDName names one disc's VCD. Grouped discs always carry their
+// disc index in the title portion — without it, serial-less discs in one
+// group collapse to a single filename and overwrite each other, and even
+// serialled discs from same-serial pressings can collide. Residual
+// collisions (e.g. pathological truncation) stay rejected downstream by
+// MultiDiscSet.Validate: never a silent overwrite.
+func groupedVCDName(item *library.LibraryItem, serial string, position int) string {
+	title := item.Title
+	if item.DiscGroupID != nil {
+		idx := item.DiscIndex
+		if idx <= 0 {
+			idx = position
+		}
+		if !discSuffixTail.MatchString(title) {
+			title = fmt.Sprintf("%s (Disc %d)", title, idx)
 		}
 	}
-	return ""
+	return cuebin.VCDFileName(serial, title)
 }
 
 // siblingVCDName deterministically names a sibling's VCD without writing.
-func siblingVCDName(sib *library.LibraryItem) (string, error) {
+// position is the 1-based fallback when the sibling carries no disc index.
+func siblingVCDName(sib *library.LibraryItem, position int) (string, error) {
 	raw, err := os.ReadFile(sib.SourcePath)
 	if err != nil {
 		return "", err
@@ -349,7 +369,7 @@ func siblingVCDName(sib *library.LibraryItem) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return cuebin.VCDFileName(serialFromMerge(binDir, merge), sib.Title), nil
+	return groupedVCDName(sib, serialFromMerge(binDir, merge), position), nil
 }
 
 // vmcDirFor names the shared-save folder after disc 1's VCD stem (spec

@@ -700,6 +700,69 @@ func TestExecutorRestartRecovery(t *testing.T) {
 	}
 }
 
+func TestGroupedSerialLessNamesDistinct(t *testing.T) {
+	// Regression: two serial-less discs sharing a group title must not
+	// collapse to one VCD filename (silent overwrite). Each keeps its
+	// disc index and the manifest lists both.
+	h := newHarness(t, ":memory:")
+	srcDir := t.TempDir()
+	for i := 1; i <= 2; i++ {
+		bin := makePatternedSectors(2)
+		if err := os.WriteFile(filepath.Join(srcDir, "d.bin"), bin, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	g := int64(1)
+	var ids []int64
+	for i := 1; i <= 2; i++ {
+		binName := "d.bin"
+		cueName := filepath.Join(srcDir, "Epic"+string(rune('0'+i))+".cue")
+		sheet := "FILE \"" + binName + "\" BINARY\n  TRACK 01 MODE2/2352\n    INDEX 01 00:00:00\n"
+		if err := os.WriteFile(cueName, []byte(sheet), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		it, err := h.lib.UpsertItem(library.LibraryItem{
+			SourcePath: cueName, ContentHash: "sg" + string(rune('0'+i)),
+			Platform: library.PlatformPS1, Title: "Epic", DiscIndex: i,
+			DiscGroupID: &g, SizeBytes: int64(2 * 2352), Status: library.StatusNew,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, it.ID)
+	}
+	dest := h.dest
+	pv1, err := PreviewConvert(mustGetItem(t, h, ids[0]), &dest, h.lib)
+	if err != nil {
+		t.Fatalf("PreviewConvert: %v", err)
+	}
+	pv2, err := PreviewConvert(mustGetItem(t, h, ids[1]), &dest, h.lib)
+	if err != nil {
+		t.Fatalf("PreviewConvert: %v", err)
+	}
+	if pv1.VCDPath == pv2.VCDPath {
+		t.Fatalf("both discs map to %q", pv1.VCDPath)
+	}
+	if !strings.Contains(pv1.VCDPath, "Epic (Disc 1).VCD") {
+		t.Errorf("disc 1 vcd = %q", pv1.VCDPath)
+	}
+	if !strings.Contains(pv2.VCDPath, "Epic (Disc 2).VCD") {
+		t.Errorf("disc 2 vcd = %q", pv2.VCDPath)
+	}
+	if len(pv1.Manifests) != 4 {
+		t.Errorf("manifests = %d, want 4 (2 per disc folder)", len(pv1.Manifests))
+	}
+}
+
+func mustGetItem(t *testing.T, h *harness, id int64) *library.LibraryItem {
+	t.Helper()
+	it, err := h.lib.Get(id)
+	if err != nil || it == nil {
+		t.Fatalf("Get(%d) = %+v, %v", id, it, err)
+	}
+	return it
+}
+
 func TestEstimate(t *testing.T) {
 	h := newHarness(t, ":memory:")
 	fat := h.dest
