@@ -354,6 +354,101 @@ func TestIntegrationEnqueueValidation(t *testing.T) {
 	}
 }
 
+func TestIntegrationEnqueueSplitKind(t *testing.T) {
+	h, cancel := newAPIHarness(t)
+	defer cancel()
+	// Sparse 5 GiB serial ISO: enqueue-only (paused) proves split
+	// derivation through the API without writing gigabytes.
+	srcDir := t.TempDir()
+	_ = makeSparseSerialISO(t, srcDir)
+	destDir := t.TempDir()
+	var dest destinationJSON
+	if code, raw := h.do("POST", "/api/destinations",
+		map[string]string{"path": destDir}); code != http.StatusCreated {
+		t.Fatalf("create dest = %d\n%s", code, raw)
+	} else if err := json.Unmarshal(raw, &dest); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := h.do("PATCH", fmt.Sprintf("/api/destinations/%d", dest.ID),
+		map[string]string{"filesystemOverride": "fat32"}); code != http.StatusOK {
+		t.Fatalf("override = %d", code)
+	}
+	var items []libraryItemJSON
+	if code, raw := h.do("POST", "/api/library/import",
+		map[string]string{"path": srcDir}); code != http.StatusCreated {
+		t.Fatalf("import = %d\n%s", code, raw)
+	} else if err := json.Unmarshal(raw, &items); err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("items = %+v", items)
+	}
+	if code, _ := h.do("POST", "/api/queue/pause", nil); code != http.StatusOK {
+		t.Fatalf("pause = %d", code)
+	}
+	var jobs []jobJSON
+	if code, raw := h.do("POST", "/api/queue", map[string]any{
+		"destinationId": dest.ID, "itemIds": []int64{items[0].ID},
+	}); code != http.StatusCreated {
+		t.Fatalf("enqueue = %d\n%s", code, raw)
+	} else if err := json.Unmarshal(raw, &jobs); err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 1 || jobs[0].Kind != "split-and-copy" || jobs[0].BytesTotal != 5<<30 {
+		t.Fatalf("jobs = %+v", jobs)
+	}
+}
+
+// makeSparseSerialISO writes PVD+SYSTEM.CNF sectors then stretches sparse
+// to 5 GiB: descriptor-valid, zero disk cost.
+func makeSparseSerialISO(t *testing.T, dir string) string {
+	t.Helper()
+	path := filepath.Join(dir, "bigdvd.iso")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := make([]byte, 20*2048)
+	pvd := head[16*2048 : 17*2048]
+	pvd[0] = 1
+	copy(pvd[1:6], "CD001")
+	pvd[6] = 1
+	copy(pvd[40:72], "BIGDVD")
+	putU32 := func(b []byte, v uint32) {
+		b[0], b[1], b[2], b[3] = byte(v), byte(v>>8), byte(v>>16), byte(v>>24)
+	}
+	putU32(pvd[80:84], 3000000)
+	copy(pvd[156:], []byte{34, 0})
+	copy(pvd[156+2:], []byte{17, 0, 0, 0})
+	copy(pvd[156+10:], []byte{0, 8, 0, 0})
+	pvd[156+25] = 2
+	pvd[156+28] = 1
+	root := head[17*2048 : 18*2048]
+	root[0], root[32] = 34, 1 // "." entry
+	copy(root[2:6], []byte{17, 0, 0, 0})
+	copy(root[10:14], []byte{0, 8, 0, 0})
+	root[25] = 2
+	off := 34
+	rec := []byte("SYSTEM.CNF;1")
+	root[off] = byte(33 + len(rec) + 1)
+	copy(root[off+2:off+6], []byte{18, 0, 0, 0})
+	cnf := "BOOT = cdrom:\\BIGG_001.01;1\n"
+	copy(root[off+10:off+14], []byte{byte(len(cnf)), 0, 0, 0})
+	root[off+32] = byte(len(rec))
+	copy(root[off+33:], rec)
+	copy(head[18*2048:], cnf)
+	if _, err := f.Write(head); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(5 << 30); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func TestIntegrationSSE(t *testing.T) {
 	h, cancel := newAPIHarness(t)
 	defer cancel()

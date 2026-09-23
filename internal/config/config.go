@@ -80,6 +80,9 @@ func Load(path string) (Settings, error) {
 		}
 		return Settings{}, err
 	}
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return Defaults(), nil // empty files (e.g. mktemp) mean defaults
+	}
 	var s Settings
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
