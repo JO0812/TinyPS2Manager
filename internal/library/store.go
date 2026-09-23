@@ -142,6 +142,43 @@ func (s *Store) UpdateDetection(id int64, dt DiscType, m DetectionMethod) error 
 	return err
 }
 
+// UpdateTitle renames an item.
+func (s *Store) UpdateTitle(id int64, title string) error {
+	if title == "" {
+		return fmt.Errorf("title is empty")
+	}
+	res, err := s.db.Exec(`UPDATE library_items SET title=?,
+		updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`, title, id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("no library item %d", id)
+	}
+	return nil
+}
+
+// SetGroup assigns (or, when nil, clears) a multi-disc group.
+func (s *Store) SetGroup(id int64, groupID *int64) error {
+	res, err := s.db.Exec(`UPDATE library_items SET disc_group_id=?,
+		updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`, groupID, id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("no library item %d", id)
+	}
+	return nil
+}
+
 // List returns all items in insertion order.
 func (s *Store) List() ([]LibraryItem, error) {
 	rows, err := s.db.Query(`SELECT id, source_path, content_hash, platform,

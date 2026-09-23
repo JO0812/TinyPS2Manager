@@ -18,6 +18,18 @@ const (
 	vmcdirLimitBytes  = 103
 )
 
+// CheckDiscCount enforces the POPSTARTER 2–4 disc window on a member count,
+// before any per-file work (fail fast for manual-wave sets).
+func CheckDiscCount(n int) error {
+	if n < minDiscs {
+		return fmt.Errorf("DISCS.TXT needs %d-%d discs, got %d (singles need no manifest)", minDiscs, maxDiscs, n)
+	}
+	if n > maxDiscs {
+		return fmt.Errorf("POPSTARTER supports %d discs, got %d: split into manual reinstall waves", maxDiscs, n)
+	}
+	return nil
+}
+
 // MultiDiscSet is one PS1 multi-disc game: VCD filenames in play order plus
 // the shared-save VMC folder name (disc 1's folder).
 type MultiDiscSet struct {
@@ -41,11 +53,8 @@ func DiscFolder(vcdName string) (string, error) {
 // validateVCDs enforces the per-entry manifest rules shared by Validate
 // and BuildDISCSTXT.
 func validateVCDs(vcds []string) error {
-	if len(vcds) < minDiscs {
-		return fmt.Errorf("DISCS.TXT needs %d-%d discs, got %d (singles need no manifest)", minDiscs, maxDiscs, len(vcds))
-	}
-	if len(vcds) > maxDiscs {
-		return fmt.Errorf("POPSTARTER supports %d discs, got %d: split into manual reinstall waves", maxDiscs, len(vcds))
+	if err := CheckDiscCount(len(vcds)); err != nil {
+		return err
 	}
 	seen := map[string]bool{}
 	for _, v := range vcds {

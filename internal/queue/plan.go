@@ -188,6 +188,10 @@ func planConvert(item *library.LibraryItem, dest *Destination, lib *library.Stor
 	if err != nil {
 		return nil, err
 	}
+	// Structural count check before touching any sibling files.
+	if err := oplfs.CheckDiscCount(len(siblings)); err != nil {
+		return nil, err
+	}
 	// Order by disc index; collect every disc's VCD name.
 	ordered := append([]library.LibraryItem{}, siblings...)
 	sortByDiscIndex(ordered)

@@ -33,6 +33,8 @@ func run(args []string) int {
 		err = cmdSplit(args[1:])
 	case "tree":
 		err = cmdTree(args[1:])
+	case "serve":
+		err = cmdServe(args[1:])
 	case "-h", "-help", "--help", "help":
 		usage()
 	default:
@@ -59,6 +61,8 @@ Usage:
                                             ISO -> USBExtreme set at out root
   oplbm tree --plan <jobs.json> --dest <root> [--prefix P]
                                             dry-run the destination tree
+  oplbm serve [--bind addr] [--db path] [--settings path]
+                                            REST + SSE API on localhost
 (note: flags must precede positional args — Go flag convention)
 
 Flags:

@@ -45,35 +45,77 @@ func New(store *Store, lib *library.Store, disk transfer.Disk, stagingDir string
 	}
 }
 
-// Run supervises one writer goroutine per known destination until ctx ends.
+// Run supervises one writer goroutine per destination until ctx ends,
+// rescanning for newly added destinations. A failed runner (e.g. lease
+// lost to another process) cools down 30s before respawn; shutdown waits
+// for all runners.
 func (e *Executor) Run(ctx context.Context) error {
-	dests, err := e.store.ListDestinations()
-	if err != nil {
-		return err
+	type runner struct {
+		cancel context.CancelFunc
+		done   chan error
 	}
-	if len(dests) == 0 {
-		<-ctx.Done()
-		return ctx.Err()
+	runners := map[int64]*runner{}
+	cooled := map[int64]time.Time{}
+	spawn := func(id int64) {
+		rctx, cancel := context.WithCancel(ctx)
+		r := &runner{cancel: cancel, done: make(chan error, 1)}
+		runners[id] = r
+		go func() { r.done <- e.RunDestination(rctx, id) }()
 	}
-	errCh := make(chan error, len(dests))
-	var wg sync.WaitGroup
-	for _, d := range dests {
-		wg.Add(1)
-		go func(id int64) {
-			defer wg.Done()
-			if err := e.RunDestination(ctx, id); err != nil {
-				errCh <- err
-			}
-		}(d.ID)
-	}
-	wg.Wait()
-	close(errCh)
-	for err := range errCh {
+	scan := func() {
+		dests, err := e.store.ListDestinations()
 		if err != nil {
-			return err
+			return
+		}
+		for id, r := range runners {
+			select {
+			case err := <-r.done:
+				delete(runners, id)
+				// Returns while the supervisor lives are real failures
+				// (lease/config), not shutdown: cool the destination.
+				if err != nil && ctx.Err() == nil {
+					cooled[id] = time.Now()
+				}
+			default:
+			}
+		}
+		known := map[int64]bool{}
+		for _, d := range dests {
+			known[d.ID] = true
+		}
+		for id := range runners {
+			if !known[id] {
+				runners[id].cancel()
+				delete(runners, id)
+			}
+		}
+		for _, d := range dests {
+			if _, ok := runners[d.ID]; ok {
+				continue
+			}
+			if t, bad := cooled[d.ID]; bad && time.Since(t) < 30*time.Second {
+				continue
+			}
+			spawn(d.ID)
 		}
 	}
-	return ctx.Err()
+	scan()
+	tick := time.NewTicker(2 * time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			for _, r := range runners {
+				r.cancel()
+			}
+			for _, r := range runners {
+				<-r.done
+			}
+			return ctx.Err()
+		case <-tick.C:
+			scan()
+		}
+	}
 }
 
 // CancelDestination aborts the running job on a destination (partial output
