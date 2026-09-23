@@ -17,32 +17,52 @@ func (s *Server) handleQueueEnqueue(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "body", err.Error())
 		return
 	}
-	if body.DestinationID <= 0 {
-		writeErr(w, http.StatusBadRequest, "destinationId", "want a positive id")
+	jobs, apiErr := s.enqueueItems(body.DestinationID, body.ItemIDs)
+	if apiErr != nil {
+		writeErr(w, apiErr.status, apiErr.field, apiErr.msg)
 		return
 	}
-	if len(body.ItemIDs) == 0 {
-		writeErr(w, http.StatusBadRequest, "itemIds", "want at least one item id")
-		return
+	out := make([]jobJSON, 0, len(jobs))
+	for _, j := range jobs {
+		out = append(out, toJobJSON(j))
 	}
-	dest, err := s.qstore.GetDestination(body.DestinationID)
+	writeJSON(w, http.StatusCreated, out)
+}
+
+// apiError is a validation failure with its HTTP mapping.
+type apiError struct {
+	status int
+	field  string
+	msg    string
+}
+
+func (e *apiError) Error() string { return e.msg }
+
+// enqueueItems validates (N4: manifests, chunks, fs, free space — all
+// through the executor's own Estimate planners) and inserts jobs. Shared
+// by POST /api/queue and the prepare-execute flow.
+func (s *Server) enqueueItems(destinationID int64, itemIDs []int64) ([]queue.Job, *apiError) {
+	fail := func(status int, field, msg string) ([]queue.Job, *apiError) {
+		return nil, &apiError{status: status, field: field, msg: msg}
+	}
+	if destinationID <= 0 {
+		return fail(http.StatusBadRequest, "destinationId", "want a positive id")
+	}
+	if len(itemIDs) == 0 {
+		return fail(http.StatusBadRequest, "itemIds", "want at least one item id")
+	}
+	dest, err := s.qstore.GetDestination(destinationID)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "", err.Error())
-		return
+		return fail(http.StatusInternalServerError, "", err.Error())
 	}
 	if dest == nil {
-		writeErr(w, http.StatusNotFound, "destinationId", "no such destination")
-		return
+		return fail(http.StatusNotFound, "destinationId", "no such destination")
 	}
 	if dest.EffectiveFilesystem() != "fat32" && dest.EffectiveFilesystem() != "exfat" {
-		writeErr(w, http.StatusUnprocessableEntity, "destination",
+		return fail(http.StatusUnprocessableEntity, "destination",
 			"filesystem unknown: set an explicit FAT32/exFAT choice first")
-		return
 	}
 
-	// Validation-first (N4): derive every kind + total through the same
-	// planners the executor runs, so manifest/chunk/size violations fail
-	// here with 422 instead of mid-queue.
 	type staged struct {
 		kind  queue.JobKind
 		total int64
@@ -50,38 +70,30 @@ func (s *Server) handleQueueEnqueue(w http.ResponseWriter, r *http.Request) {
 	}
 	var plan []staged
 	var need int64
-	for _, itemID := range body.ItemIDs {
+	for _, itemID := range itemIDs {
 		if itemID <= 0 {
-			writeErr(w, http.StatusBadRequest, "itemIds", fmt.Sprintf("bad id %d", itemID))
-			return
+			return fail(http.StatusBadRequest, "itemIds", "bad id")
 		}
 		it, err := s.lib.Get(itemID)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "", err.Error())
-			return
+			return fail(http.StatusInternalServerError, "", err.Error())
 		}
 		if it == nil {
-			writeErr(w, http.StatusNotFound, "itemIds", fmt.Sprintf("no library item %d", itemID))
-			return
+			return fail(http.StatusNotFound, "itemIds", "no such library item")
 		}
 		kind, total, err := queue.Estimate(it, dest, s.lib)
 		if err != nil {
-			writeErr(w, http.StatusUnprocessableEntity, "itemIds",
-				fmt.Sprintf("item %d: %v", itemID, err))
-			return
+			return fail(http.StatusUnprocessableEntity, "itemIds", err.Error())
 		}
 		plan = append(plan, staged{kind: kind, total: total, item: itemID})
 		need += total
 	}
 	inFlight, err := s.qstore.InFlightBytes(dest.ID)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "", err.Error())
-		return
+		return fail(http.StatusInternalServerError, "", err.Error())
 	}
 	if dest.FreeBytes >= 0 && need+inFlight > dest.FreeBytes {
-		writeErr(w, http.StatusUnprocessableEntity, "destination",
-			fmt.Sprintf("needs %d bytes, %d free (%d in flight)", need, dest.FreeBytes, inFlight))
-		return
+		return fail(http.StatusUnprocessableEntity, "destination", "not enough free space")
 	}
 
 	var rows []queue.Job
@@ -93,14 +105,9 @@ func (s *Server) handleQueueEnqueue(w http.ResponseWriter, r *http.Request) {
 	}
 	jobs, err := s.qstore.Enqueue(rows)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "", err.Error())
-		return
+		return fail(http.StatusInternalServerError, "", err.Error())
 	}
-	out := make([]jobJSON, 0, len(jobs))
-	for _, j := range jobs {
-		out = append(out, toJobJSON(j))
-	}
-	writeJSON(w, http.StatusCreated, out)
+	return jobs, nil
 }
 
 func (s *Server) handleQueueList(w http.ResponseWriter, r *http.Request) {

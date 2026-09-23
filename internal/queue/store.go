@@ -472,6 +472,30 @@ func scanJob(r rowScanner) (*Job, error) {
 
 const pausedKey = "paused"
 
+// SetState upserts a queue_state key (unstructured executor metadata,
+// e.g. staged loader versions per destination).
+func (s *Store) SetState(key, value string) error {
+	_, err := s.db.Exec(`INSERT INTO queue_state(key, value,
+		updated_at) VALUES (?,?,
+		strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+		ON CONFLICT(key) DO UPDATE SET value=excluded.value,
+		updated_at=excluded.updated_at`, key, value)
+	return err
+}
+
+// GetState reads a queue_state key.
+func (s *Store) GetState(key string) (string, bool, error) {
+	var v string
+	err := s.db.QueryRow(`SELECT value FROM queue_state WHERE key=?`, key).Scan(&v)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return v, true, nil
+}
+
 // SetPaused flips the whole-queue pause flag.
 func (s *Store) SetPaused(paused bool) error {
 	v := "0"

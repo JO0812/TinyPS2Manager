@@ -31,8 +31,8 @@ func fixturePackage(t *testing.T) []byte {
 			t.Fatal(err)
 		}
 	}
-	add("APPS/APP_RIPTOPL-PS2DEVPINNED/RIPTOPL.ELF", "pinned-elf")
-	add("APPS/APP_RIPTOPL-OFFICIALROLLING/RIPTOPL.ELF", "rolling-elf")
+	add("APP_RIPTOPL-PS2DEVPINNED/RIPTOPL.ELF", "pinned-elf")
+	add("APP_RIPTOPL-OFFICIALROLLING/RIPTOPL.ELF", "rolling-elf")
 	add("ART/README.txt", "decoy")
 	add("POPS/POPSTARTER.ELF", "decoy")
 	if err := w.Close(); err != nil {
@@ -192,7 +192,7 @@ func TestStageZipSlip(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _ = f.Write([]byte("evil"))
-	f2, err := w.Create("APPS/APP_RIPTOPL-PS2DEVPINNED/RIPTOPL.ELF")
+	f2, err := w.Create("APP_RIPTOPL-PS2DEVPINNED/RIPTOPL.ELF")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/jo/TinyPS2Manager/internal/cuebin"
 	"github.com/jo/TinyPS2Manager/internal/library"
 	"github.com/jo/TinyPS2Manager/internal/oplfs"
+	"github.com/jo/TinyPS2Manager/internal/usbextreme"
 )
 
 // Estimate derives a job's kind and byte total from its library item and
@@ -70,7 +71,74 @@ func serialOf(path string) (string, error) {
 	return cuebin.ExtractSerial(f, fi.Size(), 2048)
 }
 
-// copyPlan is a verbatim file copy into its OPL bucket.
+// CopyPreview is the dry-run shape of a copy plan (prepare endpoint).
+type CopyPreview struct {
+	DestPath string
+}
+
+// PreviewCopy resolves copy destinations without writing.
+func PreviewCopy(item *library.LibraryItem, dest *Destination) (*CopyPreview, error) {
+	p, err := planCopy(item, dest)
+	if err != nil {
+		return nil, err
+	}
+	return &CopyPreview{DestPath: p.destPath}, nil
+}
+
+// ManifestPreview is one generated text file plus its absolute path.
+type ManifestPreview struct {
+	Dir  string
+	Name string
+	Path string
+}
+
+// ConvertPreview is the dry-run shape of a convert plan.
+type ConvertPreview struct {
+	VCDPath   string
+	PopsDir   string
+	Manifests []ManifestPreview
+	VMCDirs   []string
+}
+
+// PreviewConvert resolves VCD name, manifests, and VMC dirs without writing.
+func PreviewConvert(item *library.LibraryItem, dest *Destination, lib *library.Store) (*ConvertPreview, error) {
+	p, err := planConvert(item, dest, lib)
+	if err != nil {
+		return nil, err
+	}
+	out := &ConvertPreview{
+		VCDPath: filepath.Join(p.popsDir, p.vcdName),
+		PopsDir: p.popsDir,
+		VMCDirs: p.vmcDirs,
+	}
+	for _, m := range p.manifests {
+		out.Manifests = append(out.Manifests, ManifestPreview{
+			Dir: m.dir, Name: m.name, Path: filepath.Join(m.dir, m.name),
+		})
+	}
+	return out, nil
+}
+
+// SplitPreview is the dry-run shape of a split plan.
+type SplitPreview struct {
+	Root   string
+	ULCfg  string
+	Chunks []string
+}
+
+// PreviewSplit resolves the ul.cfg path and chunk names without writing.
+func PreviewSplit(item *library.LibraryItem, dest *Destination) (*SplitPreview, error) {
+	p, err := planSplit(item, dest)
+	if err != nil {
+		return nil, err
+	}
+	out := &SplitPreview{Root: p.destDir, ULCfg: filepath.Join(p.destDir, "ul.cfg")}
+	for i := 0; i < p.chunks; i++ {
+		out.Chunks = append(out.Chunks, filepath.Join(p.destDir, usbextreme.ChunkName(p.oplName, p.serial, i)))
+	}
+	return out, nil
+}
+
 type copyPlan struct {
 	srcPath  string
 	destPath string // under base (dest root + prefix), bucket included

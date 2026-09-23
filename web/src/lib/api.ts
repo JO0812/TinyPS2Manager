@@ -58,6 +58,48 @@ export interface ProgressEvent {
   message: string;
 }
 
+export interface RiptoplPreview {
+  tag: string;
+  asset: string;
+  url: string;
+  sizeBytes: number;
+  digest: string;
+  flavours: string[];
+}
+
+export interface PreparePreview {
+  dirs: string[];
+  files: string[];
+  riptopl?: RiptoplPreview;
+  warnings: string[];
+  checklist: string[];
+}
+
+export interface StagedLoader {
+  tag: string;
+  asset: string;
+  digest: string;
+  flavour: string;
+  elfPath: string;
+  elfSize: number;
+  stagedAt: string;
+}
+
+export interface PrepareResult {
+  jobs: Job[];
+  riptopl?: StagedLoader;
+  dirs: string[];
+  files: string[];
+  checklist: string[];
+}
+
+export interface PrepareRequest {
+  mode: 'preview' | 'execute';
+  itemIds: number[];
+  riptoplTag?: string;
+  flavour?: string;
+}
+
 export interface FieldError {
   field: string;
   msg: string;
@@ -112,6 +154,9 @@ export const api = {
     patch<Job | { deleted: boolean }>(`/api/queue/${id}`, body),
   pauseAll: () => post<{ paused: boolean }>('/api/queue/pause'),
   resumeAll: () => post<{ paused: boolean }>('/api/queue/resume'),
+
+  prepare: (destId: number, body: PrepareRequest) =>
+    post<PreparePreview | PrepareResult>(`/api/destinations/${destId}/prepare`, body),
 
   settings: () => get<Settings>('/api/settings'),
   saveSettings: (s: Settings) => put<Settings>('/api/settings', s),

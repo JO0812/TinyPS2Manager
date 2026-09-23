@@ -25,6 +25,7 @@ type Server struct {
 	lib          *library.Store
 	settingsPath string
 	exec         *queue.Executor
+	riptoplBase  string // GitHub API base override (tests); "" = default
 	mux          *chi.Mux
 }
 
@@ -46,6 +47,7 @@ func New(qstore *queue.Store, lib *library.Store, settingsPath string, exec *que
 		r.Get("/destinations", s.handleDestinationsList)
 		r.Post("/destinations", s.handleDestinationsCreate)
 		r.Patch("/destinations/{id}", s.handleDestinationsPatch)
+		r.Post("/destinations/{id}/prepare", s.handlePrepare)
 		r.Post("/queue", s.handleQueueEnqueue)
 		r.Get("/queue", s.handleQueueList)
 		r.Patch("/queue/{jobId}", s.handleQueuePatch)
@@ -61,6 +63,12 @@ func New(qstore *queue.Store, lib *library.Store, settingsPath string, exec *que
 
 // Handler serves the API.
 func (s *Server) Handler() http.Handler { return s.mux }
+
+// WithRiptoplBase overrides the GitHub API base (hermetic tests).
+func (s *Server) WithRiptoplBase(base string) *Server {
+	s.riptoplBase = base
+	return s
+}
 
 // StartExecutor runs the writer supervisor in the background.
 func (s *Server) StartExecutor(ctx context.Context) {

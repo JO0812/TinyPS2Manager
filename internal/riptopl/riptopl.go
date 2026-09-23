@@ -265,10 +265,11 @@ func Stage(ctx context.Context, disk transfer.Disk, root, prefix, zipPath string
 	return nil, fmt.Errorf("package has none of the known flavours %v", flavours)
 }
 
-// findFlavourELF locates APPS/<flavour>/RIPTOPL.ELF, rejecting zip-slip
-// entries and case variants (OPL paths are case-sensitive).
+// findFlavourELF locates <FLAVOUR>/RIPTOPL.ELF at the package root (the
+// zip carries flavour dirs at top level; they land under APPS/ on the
+// device at stage time). Matching is exact: OPL paths are case-sensitive.
 func findFlavourELF(files []*zip.File, flavour string) *zip.File {
-	want := "APPS/" + flavour + "/" + ELFName
+	want := flavour + "/" + ELFName
 	for _, f := range files {
 		if f.Name != want || f.FileInfo().IsDir() {
 			continue
