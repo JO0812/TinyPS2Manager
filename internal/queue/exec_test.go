@@ -584,7 +584,7 @@ func TestExecutorSplit(t *testing.T) {
 		SourcePath: iso, ContentHash: "split1", Platform: library.PlatformPS2,
 		Title: "Split Game", DiscType: library.DiscDVD,
 		DetectionMethod: library.MethodInspected,
-		SizeBytes: fi.Size(), Status: library.StatusNew,
+		SizeBytes:       fi.Size(), Status: library.StatusNew,
 	})
 	if err != nil {
 		t.Fatal(err)

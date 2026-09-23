@@ -94,7 +94,7 @@ func TestSplitDiscSuffix(t *testing.T) {
 		title string
 		index int
 	}{
-		"Game (Disc 1)": {"Game", 1},
+		"Game (Disc 1)":  {"Game", 1},
 		"Game (DISK 02)": {"Game", 2},
 		"Game - disc 3":  {"Game", 3},
 		"Game_CD4":       {"Game", 4},

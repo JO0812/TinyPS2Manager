@@ -10,8 +10,8 @@ import (
 
 // isoMaxCNFRead caps the SYSTEM.CNF read: the file is tiny by definition.
 const (
-	isoMaxCNFRead = 64 << 10
-	serialPattern = `^[A-Z]{4}_[0-9]{3}\.[0-9]{2}$`
+	isoMaxCNFRead  = 64 << 10
+	serialPattern  = `^[A-Z]{4}_[0-9]{3}\.[0-9]{2}$`
 	bootSerialFind = `\\([A-Za-z]{4}_[0-9]{3}\.[0-9]{2})`
 )
 

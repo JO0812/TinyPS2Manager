@@ -52,13 +52,13 @@ func TestTreePathsPrefix(t *testing.T) {
 
 func TestTreePathsErrors(t *testing.T) {
 	cases := map[string]func(*TreePlan){
-		"lowercase bucket": func(p *TreePlan) { p.Add("dvd", "", "G.iso") },
-		"pops without vcd": func(p *TreePlan) { p.Add(BucketPOPS, "", "note.txt") },
-		"root game image":  func(p *TreePlan) { p.Add("", "", "Game.iso") },
-		"root with subdir": func(p *TreePlan) { p.Add("", "sub", "ul.cfg") },
+		"lowercase bucket":  func(p *TreePlan) { p.Add("dvd", "", "G.iso") },
+		"pops without vcd":  func(p *TreePlan) { p.Add(BucketPOPS, "", "note.txt") },
+		"root game image":   func(p *TreePlan) { p.Add("", "", "Game.iso") },
+		"root with subdir":  func(p *TreePlan) { p.Add("", "sub", "ul.cfg") },
 		"separator in name": func(p *TreePlan) { p.Add(BucketDVD, "", "a/b.iso") },
-		"empty name":       func(p *TreePlan) { p.Add(BucketDVD, "", "") },
-		"nested subdir":    func(p *TreePlan) { p.Add(BucketDVD, "a/b", "G.iso") },
+		"empty name":        func(p *TreePlan) { p.Add(BucketDVD, "", "") },
+		"nested subdir":     func(p *TreePlan) { p.Add(BucketDVD, "a/b", "G.iso") },
 	}
 	for name, fill := range cases {
 		p := &TreePlan{Root: "/mnt/ps2"}

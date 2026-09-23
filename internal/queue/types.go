@@ -61,14 +61,14 @@ const (
 // effective value (detected, or the user's override choice); FSOverride
 // records an explicit user choice ("fat32"/"exfat"/""), empty meaning none.
 type Destination struct {
-	ID          int64
-	Path        string
-	Kind        DestinationKind
-	Filesystem  string
-	FSOverride  string
-	BDMPrefix   string
-	FreeBytes   int64
-	UpdatedAt   string
+	ID         int64
+	Path       string
+	Kind       DestinationKind
+	Filesystem string
+	FSOverride string
+	BDMPrefix  string
+	FreeBytes  int64
+	UpdatedAt  string
 }
 
 // EffectiveFilesystem resolves the filesystem the splitting logic must use:

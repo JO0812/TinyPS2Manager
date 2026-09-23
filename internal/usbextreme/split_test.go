@@ -177,13 +177,13 @@ func TestWriteErrors(t *testing.T) {
 		src    []byte
 		size   int64
 	}{
-		"bad serial":  {"G", "nope", ok, 100},
-		"empty name":  {"", "SLUS_111.11", ok, 100},
-		"long name":   {strings.Repeat("A", 33), "SLUS_111.11", ok, 100},
-		"zero size":   {"G", "SLUS_111.11", ok, 0},
-		"short src":   {"G", "SLUS_111.11", ok[:50], 100},
-		"long src":    {"G", "SLUS_111.11", ok, 50},
-		"oversize":    {"G", "SLUS_111.11", ok, maxChunks*testChunkSize + 1},
+		"bad serial": {"G", "nope", ok, 100},
+		"empty name": {"", "SLUS_111.11", ok, 100},
+		"long name":  {strings.Repeat("A", 33), "SLUS_111.11", ok, 100},
+		"zero size":  {"G", "SLUS_111.11", ok, 0},
+		"short src":  {"G", "SLUS_111.11", ok[:50], 100},
+		"long src":   {"G", "SLUS_111.11", ok, 50},
+		"oversize":   {"G", "SLUS_111.11", ok, maxChunks*testChunkSize + 1},
 	}
 	for name, tc := range cases {
 		dir := t.TempDir()

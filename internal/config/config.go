@@ -21,10 +21,10 @@ const (
 
 // Settings is the full user-configurable set.
 type Settings struct {
-	Theme            string `json:"theme"`
-	StagingDir       string `json:"stagingDir"`
-	SplitThreshold   int64  `json:"splitThreshold"`
-	BDMprefixDefault string `json:"bdmPrefixDefault"`
+	Theme             string `json:"theme"`
+	StagingDir        string `json:"stagingDir"`
+	SplitThreshold    int64  `json:"splitThreshold"`
+	BDMprefixDefault  string `json:"bdmPrefixDefault"`
 	FilesystemDefault string `json:"filesystemDefault"`
 }
 

@@ -28,7 +28,7 @@ type TitleDB struct {
 }
 
 type dbFile struct {
-	Version int              `json:"_version"`
+	Version int                `json:"_version"`
 	Titles  map[string]DBEntry `json:"titles"`
 }
 

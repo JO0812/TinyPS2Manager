@@ -13,7 +13,7 @@ const SectorSizeVCD = 2352
 type TrackMode string
 
 const (
-	TrackAudio     TrackMode = "AUDIO"
+	TrackAudio      TrackMode = "AUDIO"
 	TrackMode1_2048 TrackMode = "MODE1/2048"
 	TrackMode1_2352 TrackMode = "MODE1/2352"
 	TrackMode2_2336 TrackMode = "MODE2/2336"
@@ -66,15 +66,15 @@ type Index struct {
 
 // Track is a single CUE TRACK entry with its indices and gaps.
 type Track struct {
-	Number   int
-	Mode     TrackMode
-	File     string // BIN filename from the enclosing FILE statement
-	FileType string // file encoding from the FILE statement (must be BINARY to merge)
-	Pregap   MSF    // PREGAP directive length (zero if absent)
-	HasPregap bool
-	Postgap  MSF // POSTGAP directive length (zero if absent)
+	Number     int
+	Mode       TrackMode
+	File       string // BIN filename from the enclosing FILE statement
+	FileType   string // file encoding from the FILE statement (must be BINARY to merge)
+	Pregap     MSF    // PREGAP directive length (zero if absent)
+	HasPregap  bool
+	Postgap    MSF // POSTGAP directive length (zero if absent)
 	HasPostgap bool
-	Indices  []Index
+	Indices    []Index
 }
 
 // IndexPos returns the position of index Number, or false if absent.
