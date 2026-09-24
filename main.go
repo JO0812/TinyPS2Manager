@@ -19,8 +19,7 @@ func main() {
 
 func run(args []string) int {
 	if len(args) < 1 {
-		usage()
-		return 2
+		return runNoArgs()
 	}
 	var err error
 	switch args[0] {

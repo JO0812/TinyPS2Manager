@@ -97,7 +97,7 @@ jobs:
       - name: Wails build
         shell: bash
         run: |
-          wails build -tags desktop -o oplbm
+          wails build -tags desktop -skipbindings -o oplbm
           ls -R build/bin 2>/dev/null || ls -lh build/bin/ 2>/dev/null || true
       - name: Bundle archive
         shell: bash
