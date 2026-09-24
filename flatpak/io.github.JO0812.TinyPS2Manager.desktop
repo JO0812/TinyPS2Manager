@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=OPL Backup Manager
+Comment=Prepare PS2/PS1 backups for OPL on USB/MX4SIO
+Exec=oplbm
+Icon=io.github.JO0812.TinyPS2Manager
+Terminal=true
+Type=Application
+Categories=Utility;Game;
+StartupWMClass=oplbm

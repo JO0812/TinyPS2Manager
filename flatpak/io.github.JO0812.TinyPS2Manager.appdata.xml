@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="console-application">
+  <id>io.github.JO0812.TinyPS2Manager</id>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <name>OPL Backup Manager</name>
+  <summary>Prepare PS2/PS1 backups for OPL on USB/MX4SIO</summary>
+  <description>
+    <p>Cross-platform desktop app that prepares a PS2/PS1 library for Open PS2 Loader (OPL/RiptOPL) on a USB or MX4SIO drive. Ingests raw PS2 .iso and PS1 .cue/.bin, classifies CD vs DVD, converts PS1 to VCD with DISCS.TXT/VMCDIR.TXT, splits &gt;4 GiB to USBExtreme for FAT32, and copies one file at a time to avoid fragmentation.</p>
+    <p>Never modifies sources, validates DISCS.TXT/VMCDIR.TXT/ul.cfg before enqueue, and persists queue in SQLite for resume.</p>
+  </description>
+  <launchable type="desktop-id">io.github.JO0812.TinyPS2Manager.desktop</launchable>
+  <provides>
+    <binary>oplbm</binary>
+  </provides>
+  <url type="homepage">https://github.com/JO0812/TinyPS2Manager</url>
+  <developer id="io.github.JO0812">
+    <name>JO0812</name>
+  </developer>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="0.1.0" date="2026-09-24">
+      <description>
+        <p>Initial release: M1-M5 (loader, art, cheats, Ember, pre-flight) with Wails desktop and headless CLI.</p>
+      </description>
+    </release>
+  </releases>
+</component>

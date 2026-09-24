@@ -1,0 +1,39 @@
+{
+  "app-id": "io.github.JO0812.TinyPS2Manager",
+  "runtime": "org.freedesktop.Platform",
+  "runtime-version": "24.08",
+  "sdk": "org.freedesktop.Sdk",
+  "command": "oplbm",
+  "finish-args": [
+    "--share=network",
+    "--filesystem=host:rw",
+    "--filesystem=/media:rw",
+    "--filesystem=/run/media:rw",
+    "--socket=fallback-x11",
+    "--socket=wayland",
+    "--device=dri"
+  ],
+  "modules": [
+    {
+      "name": "oplbm",
+      "buildsystem": "simple",
+      "build-commands": [
+        "./scripts/build-web.sh",
+        "./scripts/gen-third-party.sh",
+        "go build -o /app/bin/oplbm ./cmd/oplbm",
+        "install -Dm644 flatpak/io.github.JO0812.TinyPS2Manager.appdata.xml /app/share/metainfo/io.github.JO0812.TinyPS2Manager.appdata.xml",
+        "install -Dm644 flatpak/io.github.JO0812.TinyPS2Manager.desktop /app/share/applications/io.github.JO0812.TinyPS2Manager.desktop",
+        "install -Dm644 flatpak/io.github.JO0812.TinyPS2Manager.svg /app/share/icons/hicolor/scalable/apps/io.github.JO0812.TinyPS2Manager.svg",
+        "install -Dm644 THIRD_PARTY.md /app/share/doc/oplbm/THIRD_PARTY.md",
+        "mkdir -p /app/share/doc/oplbm/licenses && cp -r licenses/* /app/share/doc/oplbm/licenses/ || true"
+      ],
+      "sources": [
+        {
+          "type": "dir",
+          "path": "..",
+          "skip": [".git", "build", "dist", "flatpak-build", "repo", ".flatpak-builder"]
+        }
+      ]
+    }
+  ]
+}

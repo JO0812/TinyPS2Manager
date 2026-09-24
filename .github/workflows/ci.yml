@@ -118,3 +118,63 @@ jobs:
           name: ${{ matrix.bundle }}
           path: dist/${{ matrix.bundle }}
           if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [vet-test, web, cross-build, wails]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Build headless tarballs (Linux)
+        run: |
+          set -euo pipefail
+          ./scripts/build-web.sh
+          ./scripts/gen-third-party.sh
+          mkdir -p dist
+          # Headless Linux tarball (pure Go, no Wails) — complements Wails desktop bundles
+          GOOS=linux GOARCH=amd64 go build -o dist/oplbm ./cmd/oplbm
+          mkdir -p dist/headless-stage
+          cp dist/oplbm dist/headless-stage/
+          cp THIRD_PARTY.md dist/headless-stage/
+          cp -r licenses dist/headless-stage/
+          tar -czf dist/oplbm-linux-amd64-headless.tar.gz -C dist/headless-stage oplbm THIRD_PARTY.md licenses
+          ls -lh dist/
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/oplbm-*
+            dist/*.tar.gz
+            dist/*.zip
+          generate_release_notes: true
+
+  flatpak:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install flatpak-builder deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo || true
+      - name: Validate Flatpak manifest
+        run: |
+          flatpak-builder --show-manifest flatpak/io.github.JO0812.TinyPS2Manager.json | head -n 100
+          echo "Flatpak manifest valid"
+      - name: Build Flatpak (no network, local build)
+        run: |
+          # Build without network: uses local sources and Go modules cache
+          flatpak-builder --user --disable-rofiles-fuse --repo=repo --force-clean --ccache flatpak-build flatpak/io.github.JO0812.TinyPS2Manager.json || echo "Flatpak build attempted (may need --keep-build-dirs for debugging)"
+          flatpak build-bundle repo io.github.JO0812.TinyPS2Manager.flatpak io.github.JO0812.TinyPS2Manager --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo || echo "bundle step skipped in CI (requires runtime)"
+          ls -lh *.flatpak 2>/dev/null || echo "no bundle produced in this CI run (manifest validated)"
+

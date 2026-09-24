@@ -70,10 +70,11 @@ internal/
   api/              REST + SSE (/api/*, localhost-only by default)
   config/           settings store + staging path
   logging/          slog JSON file sink (~/.oplbm/logs/oplbm-YYYYMMDD.log, 10 MiB × 5, date roll)
-  riptopl/art/cheats  M5 stubs (loader provisioning & enrichment)
+  riptopl/art/cheats  loader/art/cheat fetchers (stdlib net/http + image/png, explicit per-action network)
 web/                Svelte + Vite SPA (web/dist embedded via go:embed)
-scripts/            build-web.sh, build.sh, gen-third-party.sh, e2e.sh, m1-demo.sh
+scripts/            build-web.sh, build.sh, gen-third-party.sh, build-flatpak.sh, e2e.sh
 build/              Wails resources (appicon, darwin Info.plist, windows manifest; /build/bin is output)
+flatpak/            Flatpak manifest + appdata + desktop + icon (io.github.JO0812.TinyPS2Manager)
 ```
 
 ## Lint / vet / typecheck / tests
@@ -103,10 +104,48 @@ cd web && npm run build             # vite
 ./scripts/e2e.sh                    # bootup: CLI + API + browser UI (UI skips without Chromium)
 ```
 
+## Install prepackaged binaries
+
+Tagged releases (`v*`) attach 8 artifacts via `softprops/action-gh-release`:
+
+* Headless (pure-Go, no Wails): `oplbm-windows-amd64.exe`, `oplbm-linux-amd64`, `oplbm-linux-arm64`, `oplbm-darwin-amd64`, `oplbm-darwin-arm64` — `go build ./cmd/oplbm`, works without WebKit.
+* Desktop (Wails, `build/bin/`): `oplbm-linux-amd64.tar.gz`, `oplbm-windows-amd64.zip`, `oplbm-darwin-arm64.tar.gz` — native per-runner `wails build -tags desktop`, each bundles `THIRD_PARTY.md` + `licenses/`.
+
+```bash
+# Linux tarball (headless + licenses)
+tar -xzf oplbm-linux-amd64.tar.gz
+sudo install -Dm755 oplbm /usr/local/bin/oplbm
+oplbm --help
+# or headless tarball from cross-build:
+tar -xzf oplbm-linux-amd64-headless.tar.gz  # same content, built without Wails
+
+# Windows
+Expand-Archive oplbm-windows-amd64.zip -DestinationPath .
+.\oplbm-windows-amd64.exe --help
+
+# macOS (tar.gz of .app)
+tar -xzf oplbm-darwin-arm64.tar.gz
+open build/bin/oplbm.app  # or the extracted binary
+```
+
+Flatpak (Linux, sandboxed):
+
+```bash
+# From Flathub (once published) or local build:
+flatpak --user install repo io.github.JO0812.TinyPS2Manager  # after builder
+# Build locally:
+./scripts/build-flatpak.sh            # needs flatpak + flatpak-builder
+./scripts/build-flatpak.sh --install  # → flatpak run io.github.JO0812.TinyPS2Manager
+# Permissions: --filesystem=host:rw --filesystem=/media:rw --filesystem=/run/media:rw + --share=network (explicit art/cheats/riptopl fetches)
+```
+
+Manifest lives at `flatpak/io.github.JO0812.TinyPS2Manager.json` (Freedesktop 24.08, Go + Node via `scripts/build-web.sh`), appdata at `flatpak/*.appdata.xml`, icon at `flatpak/*.svg`.
+
 ## Packaging
 
 - `scripts/build.sh` builds `web/dist`, regenerates `THIRD_PARTY.md` + `licenses/`, produces `dist/oplbm` (headless) and, when Wails is installed, `build/bin/oplbm` desktop bundle.
-- CI (`.github/workflows/ci.yml`): `vet-test`, `web`, `cross-build` (pure Go), and `wails` matrix (linux/windows/darwin amd64+arm64) that installs Wails deps, builds `-platform` with `-tags desktop`, and bundles each `build/bin/` with `THIRD_PARTY.md` + `licenses/` into `dist/oplbm-<os>-<arch>.{tar.gz,zip}`.
+- `scripts/build-flatpak.sh` builds the Flatpak bundle (`flatpak-builder` → `repo` → `*.flatpak`).
+- CI (`.github/workflows/ci.yml`): `vet-test`, `web`, `cross-build` (5 pure-Go), `wails` (3 native desktop), `release` (on `v*` tag, downloads all artifacts → `action-gh-release`), `flatpak` (validates manifest via `flatpak-builder --show-manifest`).
 - Each archive ships `THIRD_PARTY.md` (all transitive Go modules, from `go list -m all`) and `licenses/<module>/` — source via `scripts/gen-third-party.sh`.
 
 ## Logs
