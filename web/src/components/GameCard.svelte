@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { api, type LibraryItem } from '../lib/api';
 
   export let item: LibraryItem;
@@ -43,6 +44,25 @@
     error = '';
     try {
       await api.enqueue(destId, enqueueIds);
+      onChanged();
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    } finally {
+      busy = '';
+    }
+  }
+
+  async function enqueueEmber() {
+    menuOpen = false;
+    const destId = Number(localStorage.getItem('oplbm.destId') || '0');
+    if (!destId) {
+      error = 'Pick a destination first.';
+      return;
+    }
+    busy = 'queue';
+    error = '';
+    try {
+      await api.enqueue(destId, enqueueIds, 'copy-ps1-ember');
       onChanged();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -97,6 +117,26 @@
   }
 
   $: typeBadge = item.platform === 'ps2' ? (item.discType || 'untyped').toUpperCase() : 'PS1';
+  $: gameIdBadge = item.gameId ? item.gameId : '';
+  $: isUncertain = item.gameIdUncertain;
+
+  let enrich: { artKey: string; artStatus: string; cheatStatus: string; regionMatched: boolean } | null = null;
+
+  async function loadEnrich() {
+    try {
+      enrich = await api.enrichment(item.id);
+    } catch {
+      // silent: enrichment is best-effort
+    }
+  }
+
+  onMount(() => { loadEnrich(); });
+
+  function artBadgeClass(s: string): string {
+    if (s === 'found') return 'pill-green';
+    if (s === 'custom') return 'pill-purple';
+    return 'pill-gray';
+  }
 </script>
 
 <div class="game-card" class:list>
@@ -126,6 +166,20 @@
           <span class="pill pill-purple">{discCount} discs</span>
         {/if}
         <span class="pill {statusClass(item.status)}">{item.status}</span>
+        {#if gameIdBadge}
+          <span class="pill {isUncertain ? 'pill-warn' : 'pill-green'}" title={isUncertain ? 'GameID uncertain (mod/translation) — confirm before cheats' : 'GameID'}>
+            {gameIdBadge}{isUncertain ? ' ?' : ''}
+          </span>
+        {/if}
+        {#if enrich}
+          <span class="pill {artBadgeClass(enrich.artStatus)}" title={enrich.artKey}>ART:{enrich.artStatus}</span>
+          <span class="pill {enrich.cheatStatus === 'available' ? 'pill-green' : enrich.cheatStatus === 'needs_confirm' ? 'pill-warn' : 'pill-gray'}" title="Cheats">
+            CHT:{enrich.cheatStatus}
+          </span>
+          {#if !enrich.regionMatched}
+            <span class="pill pill-warn" title="Cheat region may not match disc region">region?</span>
+          {/if}
+        {/if}
       </div>
     {/if}
     <div class="menu-wrap">
@@ -138,6 +192,9 @@
           {#if item.platform === 'ps2'}
             <button onclick={() => setType('cd')} disabled={busy !== ''}>Mark as CD</button>
             <button onclick={() => setType('dvd')} disabled={busy !== ''}>Mark as DVD</button>
+          {/if}
+          {#if item.platform === 'ps1'}
+            <button onclick={enqueueEmber} disabled={busy !== ''} title="Copy CUE+BINs to EMBER/games without VCD conversion (beta, needs BIOS)">Add as Ember (no convert)</button>
           {/if}
           <button onclick={startRename}>Rename…</button>
         </div>
@@ -208,6 +265,18 @@
   .pill-danger {
     background: var(--danger-soft);
     color: var(--danger);
+  }
+  .pill-warn {
+    background: #fff3cd;
+    color: #664d03;
+  }
+  .pill-green {
+    background: var(--success-soft, #d1f0d1);
+    color: var(--success, #0a6b0a);
+  }
+  .pill-purple {
+    background: #e8d5ff;
+    color: #4c1d95;
   }
   .menu-wrap {
     position: absolute;

@@ -56,27 +56,19 @@ jobs:
       - run: GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o dist/oplbm-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./cmd/oplbm
 
   wails:
-    # Wails desktop bundles per OS/arch; each archive ships the Wails-built
-    # binary + THIRD_PARTY.md + licenses/ (BUILD-PLAN M4 6.4).
+    # Wails desktop bundles per OS; each archive ships the Wails-built
+    # binary + THIRD_PARTY.md + licenses/ (BUILD-PLAN M4 6.4). Native builds
+    # only (cross- CG0 toolchains would be needed for linux/arm64 etc.).
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
-            platform: linux/amd64
             bundle: oplbm-linux-amd64.tar.gz
-          - os: ubuntu-latest
-            platform: linux/arm64
-            bundle: oplbm-linux-arm64.tar.gz
           - os: windows-latest
-            platform: windows/amd64
             bundle: oplbm-windows-amd64.zip
           - os: macos-latest
-            platform: darwin/amd64
-            bundle: oplbm-darwin-amd64.tar.gz
-          - os: macos-latest
-            platform: darwin/arm64
             bundle: oplbm-darwin-arm64.tar.gz
     steps:
       - uses: actions/checkout@v4
@@ -94,14 +86,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev build-essential pkg-config
       - name: Install Wails CLI
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
       - name: Build web
         run: ./scripts/build-web.sh
       - name: Third-party notices
         run: ./scripts/gen-third-party.sh
       - name: Wails build
         run: |
-          ~/go/bin/wails build -platform ${{ matrix.platform }} -tags desktop -o oplbm
+          wails build -tags desktop -o oplbm
           ls -lh build/bin/
       - name: Bundle archive
         shell: bash

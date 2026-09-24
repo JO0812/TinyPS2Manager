@@ -6,6 +6,7 @@
   export let onClose: () => void;
 
   let tag: string = 'current-fan-favorite';
+  let ps1Mode: 'vcd' | 'ember' = 'vcd';
   let preview: PreparePreview | null = null;
   let result: PrepareResult | null = null;
   let busy = '';
@@ -20,6 +21,7 @@
         mode: 'preview',
         itemIds,
         riptoplTag: withLoader ? tag : undefined,
+        kind: ps1Mode === 'ember' ? 'copy-ps1-ember' : undefined,
       });
       preview = res as PreparePreview;
     } catch (e) {
@@ -37,6 +39,7 @@
         mode: 'execute',
         itemIds,
         riptoplTag: preview?.riptopl ? tag : undefined,
+        kind: ps1Mode === 'ember' ? 'copy-ps1-ember' : undefined,
       })) as PrepareResult;
       result = res;
       preview = null;
@@ -89,6 +92,15 @@
         <div class="muted small">sha256 {loader.digest.slice(0, 16)}… · flavour order: {loader.flavours.join(', ')}</div>
       </div>
     {/if}
+
+    <h3>PS1 handling</h3>
+    <div class="row">
+      <select bind:value={ps1Mode} aria-label="PS1 mode">
+        <option value="vcd">POPSTARTER VCD (default, mature)</option>
+        <option value="ember">Ember (beta, no convert, needs bios.bin)</option>
+      </select>
+      <span class="muted small">Ember keeps CUE/BIN names, needs 512 KB EMBER/bios.bin at drive root</span>
+    </div>
 
     {#if error}
       <p class="notice err">{error}</p>

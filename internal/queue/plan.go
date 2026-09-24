@@ -429,9 +429,9 @@ type emberPlan struct {
 
 // PreviewEmber resolves the Ember dest dir and total without writing.
 type EmberPreview struct {
-	DestDir  string
-	Files    []string // absolute dest paths for cue+bins
-	Total    int64
+	DestDir string
+	Files   []string // absolute dest paths for cue+bins
+	Total   int64
 }
 
 func PreviewEmber(item *library.LibraryItem, dest *Destination) (*EmberPreview, error) {

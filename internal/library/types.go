@@ -47,17 +47,17 @@ const CDCapacityBytes = 700 * 1024 * 1024
 // (e.g. SLUS_213.85) extracted from SYSTEM.CNF; GameIDUncertain marks
 // mods/translations whose serial names a different base game (spec §2.3.5).
 type LibraryItem struct {
-	ID               int64
-	SourcePath       string
-	ContentHash      string
-	Platform         Platform
-	DiscType         DiscType
-	DetectionMethod  DetectionMethod
-	Title            string
-	DiscIndex        int
-	DiscGroupID      *int64
-	SizeBytes        int64
-	Status           Status
-	GameID           string
-	GameIDUncertain  bool
+	ID              int64
+	SourcePath      string
+	ContentHash     string
+	Platform        Platform
+	DiscType        DiscType
+	DetectionMethod DetectionMethod
+	Title           string
+	DiscIndex       int
+	DiscGroupID     *int64
+	SizeBytes       int64
+	Status          Status
+	GameID          string
+	GameIDUncertain bool
 }

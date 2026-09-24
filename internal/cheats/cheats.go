@@ -117,7 +117,7 @@ func ParseDatabase(data []byte) (map[string]RawGame, error) {
 			pos++
 			continue
 		}
-			// Name line - strip surrounding quotes for title/cheat names
+		// Name line - strip surrounding quotes for title/cheat names
 		cleanName := strings.Trim(inf.trimmed, `"`)
 		// Determine if it's a game title or cheat name via lookahead
 		isCheat := peekIsHex(pos)

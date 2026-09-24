@@ -36,6 +36,16 @@ func run(args []string) int {
 		err = cmdTree(args[1:])
 	case "serve":
 		err = cmdServe(args[1:])
+	case "gameid":
+		err = cmdGameID(args[1:])
+	case "art":
+		err = cmdArt(args[1:])
+	case "cheats":
+		err = cmdCheats(args[1:])
+	case "riptopl":
+		err = cmdRiptopl(args[1:])
+	case "preflight":
+		err = cmdPreflight(args[1:])
 	case "-h", "-help", "--help", "help":
 		usage()
 	default:
@@ -64,6 +74,14 @@ Usage:
                                             dry-run the destination tree
   oplbm serve [--bind addr] [--db path] [--settings path]
                                             REST + SSE API on localhost
+  oplbm gameid <iso>                            print PS2 serial (SYSTEM.CNF BOOT2)
+  oplbm art --device <id> [--missing-only] [--db path]
+                                            fetch & stage cover art (ART/)
+  oplbm cheats --device <id> [--confirm-uncertain] [--db path]
+                                            build & stage .cht cheats (CHT/)
+  oplbm riptopl --device <id> [--tag rolling] [--db path]
+                                            download & stage RIPTOPL.ELF (APPS/)
+  oplbm preflight --device <id> [--db path]     run drive pre-flight checks
 (note: flags must precede positional args — Go flag convention)
 
 Flags:

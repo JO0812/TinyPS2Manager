@@ -12,6 +12,27 @@ export interface LibraryItem {
   discGroupId: number | null;
   sizeBytes: number;
   status: string;
+  gameId: string;
+  gameIdUncertain: boolean;
+}
+
+export interface Enrichment {
+  gameId: string;
+  gameIdUncertain: boolean;
+  artKey: string;
+  artStatus: string;
+  cheatStatus: string;
+  regionMatched: boolean;
+}
+
+export interface PreflightCheck {
+  name: string;
+  status: 'pass' | 'fail' | 'warn';
+  message: string;
+}
+export interface PreflightResult {
+  checks: PreflightCheck[];
+  blocked: boolean;
 }
 
 export interface Job {
@@ -99,6 +120,7 @@ export interface PrepareRequest {
   itemIds: number[];
   riptoplTag?: string;
   flavour?: string;
+  kind?: string;
 }
 
 export interface FieldError {
@@ -141,16 +163,18 @@ export const api = {
   importDir: (path: string) => post<LibraryItem[]>('/api/library/import', { path }),
   patchLibrary: (id: number, body: { discType?: string; title?: string; discGroupId?: number | null }) =>
     patch<LibraryItem>(`/api/library/${id}`, body),
+  enrichment: (id: number) => get<Enrichment>(`/api/library/${id}/enrichment`),
 
   destinations: () => get<Destination[]>('/api/destinations'),
   createDestination: (body: { path: string; kind?: string; filesystemOverride?: string; bdmPrefix?: string }) =>
     post<Destination>('/api/destinations', body),
   patchDestination: (id: number, body: { bdmPrefix?: string; filesystemOverride?: string }) =>
     patch<Destination>(`/api/destinations/${id}`, body),
+  preflight: (id: number) => get<PreflightResult>(`/api/destinations/${id}/preflight`),
 
   queue: () => get<Job[]>('/api/queue'),
-  enqueue: (destinationId: number, itemIds: number[]) =>
-    post<Job[]>('/api/queue', { destinationId, itemIds }),
+  enqueue: (destinationId: number, itemIds: number[], kind?: string) =>
+    post<Job[]>('/api/queue', { destinationId, itemIds, kind }),
   jobAction: (id: number, body: { action?: string; order?: number }) =>
     patch<Job | { deleted: boolean }>(`/api/queue/${id}`, body),
   pauseAll: () => post<{ paused: boolean }>('/api/queue/pause'),
@@ -158,6 +182,9 @@ export const api = {
 
   prepare: (destId: number, body: PrepareRequest) =>
     post<PreparePreview | PrepareResult>(`/api/destinations/${destId}/prepare`, body),
+
+  enrich: (kind: 'art' | 'cheats' | 'riptopl', body: { destinationId: number; itemIds?: number[]; tag?: string; confirmUncertain?: boolean; missingOnly?: boolean }) =>
+    post<{ results: unknown[] } | { tag: string; asset: string; url: string; digest: string; flavour: string; elfPath: string }>(`/api/enrich/${kind}`, body),
 
   settings: () => get<Settings>('/api/settings'),
   saveSettings: (s: Settings) => put<Settings>('/api/settings', s),

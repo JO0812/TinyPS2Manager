@@ -144,5 +144,3 @@ func TestEmberPlanAndExecute(t *testing.T) {
 		t.Error("CUE content not preserved byte-for-byte")
 	}
 }
-
-

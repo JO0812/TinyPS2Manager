@@ -16,10 +16,10 @@ import (
 var boot2Re = regexp.MustCompile(`(?i)BOOT2\s*=\s*cdrom0:\\([A-Z]{4}_\d{3}\.\d{2})`)
 
 const (
-	sectorSize  = 2048
-	pvdSector   = 16
-	pvdRootOff  = 156
-	pvdRootLen  = 34
+	sectorSize = 2048
+	pvdSector  = 16
+	pvdRootOff = 156
+	pvdRootLen = 34
 )
 
 // ExtractGameID streams SYSTEM.CNF out of path (ISO) and parses BOOT2.

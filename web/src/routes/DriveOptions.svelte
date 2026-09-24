@@ -86,6 +86,29 @@
     return d.totalBytes > 0 ? `${base} of ${formatBytes(d.totalBytes)})` : `${base})`;
   }
 
+  let preflight: { checks: { name: string; status: string; message: string }[]; blocked: boolean } | null = null;
+  let preflightBusy = false;
+  let preflightError = '';
+
+  async function loadPreflight() {
+    if (!dest) return;
+    preflightBusy = true;
+    preflightError = '';
+    try {
+      preflight = await api.preflight(dest.id);
+    } catch (e) {
+      preflightError = e instanceof Error ? e.message : String(e);
+      preflight = null;
+    } finally {
+      preflightBusy = false;
+    }
+  }
+
+  $: if (dest) {
+    // auto-load preflight when selection changes (fire-and-forget)
+    loadPreflight();
+  }
+
   onMount(() => {
     selectedId = Number(localStorage.getItem('oplbm.destId') || '0');
     refresh();
@@ -152,10 +175,38 @@
         BDM prefix
         <input class="field" value={dest.bdmPrefix} onchange={(e) => savePrefix(dest, e.currentTarget.value)} placeholder="(drive root)" />
       </label>
-      <button class="btn-primary big" onclick={() => (showPrepare = true)} disabled={items.length === 0}>
+
+      <div class="preflight">
+        <h3>Pre-flight checks</h3>
+        <button class="btn-ghost small" onclick={loadPreflight} disabled={preflightBusy}>
+          {preflightBusy ? 'Checking…' : 'Re-check'}
+        </button>
+        {#if preflightError}
+          <p class="notice err">{preflightError}</p>
+        {/if}
+        {#if preflight}
+          <ul class="checks">
+            {#each preflight.checks as c}
+              <li class="check {c.status}">
+                <span class="badge {c.status}">{c.status}</span>
+                <strong>{c.name}</strong> — {c.message}
+              </li>
+            {/each}
+          </ul>
+          {#if preflight.blocked}
+            <p class="notice err">Pre-flight blocked: fix fail checks before enqueue.</p>
+          {:else}
+            <p class="notice">Pre-flight passed (warnings are non-blocking).</p>
+          {/if}
+        {/if}
+      </div>
+
+      <button class="btn-primary big" onclick={() => (showPrepare = true)} disabled={items.length === 0 || preflight?.blocked}>
         Prepare external drive
       </button>
-      {#if items.length === 0}
+      {#if preflight?.blocked}
+        <p class="muted small">Fix pre-flight failures before preparing.</p>
+      {:else if items.length === 0}
         <p class="muted small">Import games in the Library first.</p>
       {/if}
     {:else}
@@ -272,5 +323,61 @@
   .notice.err {
     background: var(--danger-soft);
     color: var(--danger);
+  }
+  .preflight {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+  }
+  .preflight h3 {
+    margin: 0 0 8px;
+    font-size: 14px;
+  }
+  .checks {
+    list-style: none;
+    margin: 8px 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .check {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    font-size: 12px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+  }
+  .check.fail {
+    border-color: var(--danger);
+    background: var(--danger-soft);
+  }
+  .check.warn {
+    border-color: #e6c200;
+    background: #fff9db;
+  }
+  .badge {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 6px;
+    min-width: 36px;
+    text-align: center;
+  }
+  .badge.pass {
+    background: var(--success-soft);
+    color: var(--success);
+  }
+  .badge.fail {
+    background: var(--danger-soft);
+    color: var(--danger);
+  }
+  .badge.warn {
+    background: #fff3cd;
+    color: #664d03;
   }
 </style>

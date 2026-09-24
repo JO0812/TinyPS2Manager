@@ -44,16 +44,19 @@ func New(qstore *queue.Store, lib *library.Store, settingsPath string, exec *que
 		r.Get("/library", s.handleLibraryList)
 		r.Post("/library/import", s.handleLibraryImport)
 		r.Patch("/library/{id}", s.handleLibraryPatch)
+		r.Get("/library/{id}/enrichment", s.handleLibraryEnrichment)
 		r.Get("/destinations", s.handleDestinationsList)
 		r.Post("/destinations", s.handleDestinationsCreate)
 		r.Patch("/destinations/{id}", s.handleDestinationsPatch)
 		r.Post("/destinations/{id}/prepare", s.handlePrepare)
+		r.Get("/destinations/{id}/preflight", s.handlePreflight)
 		r.Post("/queue", s.handleQueueEnqueue)
 		r.Get("/queue", s.handleQueueList)
 		r.Patch("/queue/{jobId}", s.handleQueuePatch)
 		r.Post("/queue/pause", s.handleQueuePause)
 		r.Post("/queue/resume", s.handleQueueResume)
 		r.Get("/queue/events", s.handleEvents)
+		r.Post("/enrich/{kind}", s.handleEnrich)
 		r.Get("/settings", s.handleSettingsGet)
 		r.Put("/settings", s.handleSettingsPut)
 	})
@@ -131,6 +134,8 @@ type libraryItemJSON struct {
 	DiscGroupID     *int64 `json:"discGroupId"`
 	SizeBytes       int64  `json:"sizeBytes"`
 	Status          string `json:"status"`
+	GameID          string `json:"gameId"`
+	GameIDUncertain bool   `json:"gameIdUncertain"`
 }
 
 func toLibraryItemJSON(it library.LibraryItem) libraryItemJSON {
@@ -140,6 +145,7 @@ func toLibraryItemJSON(it library.LibraryItem) libraryItemJSON {
 		DetectionMethod: string(it.DetectionMethod), Title: it.Title,
 		DiscIndex: it.DiscIndex, DiscGroupID: it.DiscGroupID,
 		SizeBytes: it.SizeBytes, Status: string(it.Status),
+		GameID: it.GameID, GameIDUncertain: it.GameIDUncertain,
 	}
 }
 
