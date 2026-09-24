@@ -94,9 +94,10 @@ jobs:
       - name: Third-party notices
         run: ./scripts/gen-third-party.sh
       - name: Wails build
+        shell: bash
         run: |
           wails build -tags desktop -o oplbm
-          ls -lh build/bin/
+          ls -R build/bin 2>/dev/null || ls -lh build/bin/ 2>/dev/null || true
       - name: Bundle archive
         shell: bash
         run: |
