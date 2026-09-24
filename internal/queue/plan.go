@@ -38,6 +38,16 @@ func estimatePS1(item *library.LibraryItem, dest *Destination, lib *library.Stor
 	return KindConvertCopy, plan.total, nil
 }
 
+// EstimateEmber derives the Ember job's kind and byte total without writing.
+// It validates the BIOS gate (512 KB) before enqueue (N4).
+func EstimateEmber(item *library.LibraryItem, dest *Destination) (JobKind, int64, error) {
+	plan, err := planEmber(item, dest)
+	if err != nil {
+		return "", 0, err
+	}
+	return KindEmberCopy, plan.total, nil
+}
+
 func estimatePS2(item *library.LibraryItem, dest *Destination) (JobKind, int64, error) {
 	fi, err := os.Stat(item.SourcePath)
 	if err != nil {
@@ -406,6 +416,130 @@ func serialFromMerge(binDir string, plan *cuebin.Plan) string {
 		return serial
 	}
 	return ""
+}
+
+// emberPlan is a PS1 Ember layout: plain CUE+BIN copy, no conversion.
+type emberPlan struct {
+	srcCue   string
+	srcBins  []string // absolute paths, deduped
+	binNames []string // base names as in CUE (preserved)
+	destDir  string   // absolute EMBER/games/<Name>
+	total    int64
+}
+
+// PreviewEmber resolves the Ember dest dir and total without writing.
+type EmberPreview struct {
+	DestDir  string
+	Files    []string // absolute dest paths for cue+bins
+	Total    int64
+}
+
+func PreviewEmber(item *library.LibraryItem, dest *Destination) (*EmberPreview, error) {
+	p, err := planEmber(item, dest)
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	files = append(files, filepath.Join(p.destDir, filepath.Base(p.srcCue)))
+	for _, n := range p.binNames {
+		files = append(files, filepath.Join(p.destDir, n))
+	}
+	return &EmberPreview{DestDir: p.destDir, Files: files, Total: p.total}, nil
+}
+
+// planEmber computes the Ember layout and validates the BIOS gate.
+func planEmber(item *library.LibraryItem, dest *Destination) (*emberPlan, error) {
+	if item.Platform != library.PlatformPS1 {
+		return nil, fmt.Errorf("item %d is not PS1", item.ID)
+	}
+	raw, err := os.ReadFile(item.SourcePath)
+	if err != nil {
+		return nil, err
+	}
+	sheet, err := cuebin.Parse(string(raw))
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", item.SourcePath, err)
+	}
+	binDir := filepath.Dir(item.SourcePath)
+	seen := map[string]bool{}
+	var srcBins []string
+	var binNames []string
+	var total int64
+	// CUE file itself
+	fi, err := os.Stat(item.SourcePath)
+	if err != nil {
+		return nil, err
+	}
+	total += fi.Size()
+	for _, tr := range sheet.Tracks {
+		if seen[tr.File] {
+			continue
+		}
+		seen[tr.File] = true
+		abs := filepath.Join(binDir, tr.File)
+		fi, err := os.Stat(abs)
+		if err != nil {
+			return nil, fmt.Errorf("BIN %s: %w", tr.File, err)
+		}
+		srcBins = append(srcBins, abs)
+		binNames = append(binNames, tr.File)
+		total += fi.Size()
+	}
+	// Folder name from title (sanitized, no separators).
+	folder := sanitizeEmberName(item.Title)
+	if folder == "" {
+		folder = strings.TrimSuffix(filepath.Base(item.SourcePath), filepath.Ext(item.SourcePath))
+		folder = sanitizeEmberName(folder)
+		if folder == "" {
+			folder = "Game"
+		}
+	}
+	destDir := filepath.Join(dest.Path, dest.BDMPrefix, string(oplfs.BucketEmber), "games", folder)
+	if err := checkBios(dest); err != nil {
+		return nil, err
+	}
+	return &emberPlan{
+		srcCue: item.SourcePath, srcBins: srcBins, binNames: binNames,
+		destDir: destDir, total: total,
+	}, nil
+}
+
+func sanitizeEmberName(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range s {
+		switch r {
+		case '/', '\\', ':', '*', '?', '"', '<', '>', '|':
+			b.WriteRune('_')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	out := b.String()
+	if len(out) > 64 {
+		out = out[:64]
+	}
+	return out
+}
+
+// checkBios validates EMBER/bios.bin at the destination (fail-closed).
+// The app never downloads, fabricates, or placeholders a BIOS.
+func checkBios(dest *Destination) error {
+	biosPath := filepath.Join(dest.Path, dest.BDMPrefix, string(oplfs.BucketEmber), "bios.bin")
+	fi, err := os.Stat(biosPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("PS1 BIOS missing — place your own `EMBER/bios.bin` (expected exactly 512 KB at %s)", biosPath)
+		}
+		return err
+	}
+	if fi.Size() != 512*1024 {
+		return fmt.Errorf("PS1 BIOS missing — place your own `EMBER/bios.bin` (expected exactly 512 KB at %s, got %d bytes)", biosPath, fi.Size())
+	}
+	return nil
 }
 
 // splitPlan is a USBExtreme split at the device root.

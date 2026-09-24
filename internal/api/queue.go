@@ -12,12 +12,23 @@ func (s *Server) handleQueueEnqueue(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		DestinationID int64   `json:"destinationId"`
 		ItemIDs       []int64 `json:"itemIds"`
+		Kind          *string `json:"kind"`
 	}
 	if err := decodeStrict(r, &body); err != nil {
 		writeErr(w, http.StatusBadRequest, "body", err.Error())
 		return
 	}
-	jobs, apiErr := s.enqueueItems(body.DestinationID, body.ItemIDs)
+	var kind queue.JobKind
+	if body.Kind != nil {
+		kind = queue.JobKind(*body.Kind)
+		switch kind {
+		case queue.KindCopy, queue.KindConvertCopy, queue.KindSplitAndCopy, queue.KindEmberCopy, queue.KindEnrich, "":
+		default:
+			writeErr(w, http.StatusBadRequest, "kind", "unknown job kind")
+			return
+		}
+	}
+	jobs, apiErr := s.enqueueItems(body.DestinationID, body.ItemIDs, kind)
 	if apiErr != nil {
 		writeErr(w, apiErr.status, apiErr.field, apiErr.msg)
 		return
@@ -40,8 +51,10 @@ func (e *apiError) Error() string { return e.msg }
 
 // enqueueItems validates (N4: manifests, chunks, fs, free space — all
 // through the executor's own Estimate planners) and inserts jobs. Shared
-// by POST /api/queue and the prepare-execute flow.
-func (s *Server) enqueueItems(destinationID int64, itemIDs []int64) ([]queue.Job, *apiError) {
+// by POST /api/queue and the prepare-execute flow. If kind is non-empty
+// it forces that kind for PS1 items (ember); PS2 items with a forced PS1
+// kind fail closed.
+func (s *Server) enqueueItems(destinationID int64, itemIDs []int64, kind queue.JobKind) ([]queue.Job, *apiError) {
 	fail := func(status int, field, msg string) ([]queue.Job, *apiError) {
 		return nil, &apiError{status: status, field: field, msg: msg}
 	}
@@ -81,11 +94,30 @@ func (s *Server) enqueueItems(destinationID int64, itemIDs []int64) ([]queue.Job
 		if it == nil {
 			return fail(http.StatusNotFound, "itemIds", "no such library item")
 		}
-		kind, total, err := queue.Estimate(it, dest, s.lib)
+		var k queue.JobKind
+		var total int64
+		if kind == queue.KindEmberCopy {
+			k, total, err = queue.EstimateEmber(it, dest)
+		} else if kind != "" {
+			// Forced kind must match the estimator's choice; we still
+			// validate via Estimate and then override if compatible.
+			autoK, autoTotal, aerr := queue.Estimate(it, dest, s.lib)
+			if aerr != nil {
+				return fail(http.StatusUnprocessableEntity, "itemIds", aerr.Error())
+			}
+			if kind != autoK {
+				// Allow ember as explicit override for PS1; otherwise the
+				// forced kind must equal the auto kind.
+				return fail(http.StatusUnprocessableEntity, "kind", fmt.Sprintf("kind %q does not match item %d (%q)", kind, itemID, autoK))
+			}
+			k, total, err = autoK, autoTotal, nil
+		} else {
+			k, total, err = queue.Estimate(it, dest, s.lib)
+		}
 		if err != nil {
 			return fail(http.StatusUnprocessableEntity, "itemIds", err.Error())
 		}
-		plan = append(plan, staged{kind: kind, total: total, item: itemID})
+		plan = append(plan, staged{kind: k, total: total, item: itemID})
 		need += total
 	}
 	inFlight, err := s.qstore.InFlightBytes(dest.ID)

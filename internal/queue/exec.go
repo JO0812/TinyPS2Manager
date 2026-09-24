@@ -269,6 +269,7 @@ type workItem struct {
 	copy  *copyPlan
 	conv  *convertPlan
 	split *splitPlan
+	ember *emberPlan
 }
 
 // prepare loads the item + destination and computes the kind plan (pure CPU
@@ -298,7 +299,7 @@ func (e *Executor) prepare(job *Job) (workItem, error) {
 	case KindSplitAndCopy:
 		w.split, err = planSplit(item, dest)
 	case KindEmberCopy:
-		err = fmt.Errorf("copy-ps1-ember executes in its own milestone")
+		w.ember, err = planEmber(item, dest)
 	case KindEnrich:
 		err = fmt.Errorf("enrich executes in its own milestone")
 	default:
@@ -356,6 +357,8 @@ func (e *Executor) executeJob(ctx context.Context, dest *Destination, job *Job, 
 		runErr = e.runConvert(jobCtx, w, tr)
 	case KindSplitAndCopy:
 		runErr = e.runSplit(jobCtx, w, tr)
+	case KindEmberCopy:
+		runErr = e.runEmber(jobCtx, w, tr)
 	default:
 		runErr = fmt.Errorf("unknown job kind %q", job.Kind)
 	}
@@ -384,6 +387,8 @@ func (w workItem) total() int64 {
 		return w.conv.total
 	case w.split != nil:
 		return w.split.size
+	case w.ember != nil:
+		return w.ember.total
 	}
 	return 0
 }
@@ -552,6 +557,48 @@ func (e *Executor) runSplit(ctx context.Context, w workItem, tr *tracker) error 
 		return fmt.Errorf("verify ul set %s: content mismatch", s.serial)
 	}
 	return nil
+}
+
+// runEmber copies the CUE and all referenced BINs into
+// EMBER/games/<Name>/ preserving names byte-for-byte (the CUE references
+// them). The BIOS gate is re-checked here (fail-closed).
+func (e *Executor) runEmber(ctx context.Context, w workItem, tr *tracker) error {
+	p := w.ember
+	if err := checkBios(w.dest); err != nil {
+		return err
+	}
+	if err := e.disk.MkdirAll(p.destDir); err != nil {
+		return err
+	}
+	tr.setPhase(PhaseCopying)
+	// Copy CUE first
+	if err := e.copyFileForEmber(ctx, p.srcCue, filepath.Join(p.destDir, filepath.Base(p.srcCue)), tr); err != nil {
+		return err
+	}
+	for i, src := range p.srcBins {
+		name := p.binNames[i]
+		if err := e.copyFileForEmber(ctx, src, filepath.Join(p.destDir, name), tr); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (e *Executor) copyFileForEmber(ctx context.Context, srcPath, destPath string, tr *tracker) error {
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	fi, err := src.Stat()
+	if err != nil {
+		return err
+	}
+	h := sha256.New()
+	if err := e.disk.CopyToDest(ctx, destPath, io.TeeReader(src, h), fi.Size(), tr.add); err != nil {
+		return err
+	}
+	return e.verifyFile(tr, destPath, fi.Size(), h.Sum(nil))
 }
 
 // verifyFile hash-checks a copied file against the source hash + size.

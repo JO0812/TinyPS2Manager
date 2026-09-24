@@ -10,6 +10,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/jo/TinyPS2Manager/internal/library"
 	"github.com/jo/TinyPS2Manager/internal/queue"
 	"github.com/jo/TinyPS2Manager/internal/riptopl"
 	"github.com/jo/TinyPS2Manager/internal/transfer"
@@ -25,6 +26,7 @@ type prepareRequest struct {
 	ItemIDs    []int64 `json:"itemIds"`
 	RiptoplTag string  `json:"riptoplTag"` // "" = skip the loader
 	Flavour    string  `json:"flavour"`    // "" = preference order
+	Kind       *string `json:"kind"`       // optional: "copy-ps1-ember" for PS1 Ember preview
 }
 
 type riptoplPreview struct {
@@ -113,7 +115,8 @@ func dirOf(p string) string { return filepath.Dir(p) }
 
 // treePreview dry-runs the destination tree for items: per-item estimate
 // errors become warnings (the set may still be useful), never writes.
-func (s *Server) treePreview(dest *queue.Destination, itemIDs []int64) (dirs, files []string, warnings []string) {
+// If forcedKind is KindEmberCopy, PS1 items use the Ember layout.
+func (s *Server) treePreview(dest *queue.Destination, itemIDs []int64, forcedKind queue.JobKind) (dirs, files []string, warnings []string) {
 	dirSet, fileSet := map[string]bool{}, map[string]bool{}
 	addFile := func(p string) { fileSet[p] = true }
 	addDir := func(p string) { dirSet[p] = true }
@@ -123,9 +126,15 @@ func (s *Server) treePreview(dest *queue.Destination, itemIDs []int64) (dirs, fi
 			warnings = append(warnings, fmt.Sprintf("item %d: not found", itemID))
 			continue
 		}
-		kind, _, err := queue.Estimate(it, dest, s.lib)
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("%s: %v", it.Title, err))
+		var kind queue.JobKind
+		var estErr error
+		if forcedKind == queue.KindEmberCopy && it.Platform == library.PlatformPS1 {
+			kind, _, estErr = queue.EstimateEmber(it, dest)
+		} else {
+			kind, _, estErr = queue.Estimate(it, dest, s.lib)
+		}
+		if estErr != nil {
+			warnings = append(warnings, fmt.Sprintf("%s: %v", it.Title, estErr))
 			continue
 		}
 		switch kind {
@@ -163,6 +172,16 @@ func (s *Server) treePreview(dest *queue.Destination, itemIDs []int64) (dirs, fi
 				addFile(c)
 			}
 			addDir(sp.Root)
+		case queue.KindEmberCopy:
+			ep, err := queue.PreviewEmber(it, dest)
+			if err != nil {
+				warnings = append(warnings, fmt.Sprintf("%s: %v", it.Title, err))
+				continue
+			}
+			for _, f := range ep.Files {
+				addFile(f)
+			}
+			addDir(ep.DestDir)
 		default:
 			warnings = append(warnings, fmt.Sprintf("%s: kind %s not plannable", it.Title, kind))
 		}
@@ -179,7 +198,11 @@ func (s *Server) treePreview(dest *queue.Destination, itemIDs []int64) (dirs, fi
 }
 
 func (s *Server) previewPrepare(ctx context.Context, dest *queue.Destination, body *prepareRequest) (*preparePreview, *apiError) {
-	dirs, files, warnings := s.treePreview(dest, body.ItemIDs)
+	forced := queue.JobKind("")
+	if body.Kind != nil {
+		forced = queue.JobKind(*body.Kind)
+	}
+	dirs, files, warnings := s.treePreview(dest, body.ItemIDs, forced)
 	pv := &preparePreview{Dirs: dirs, Files: files, Warnings: warnings, Checklist: riptopl.Checklist()}
 	if body.RiptoplTag == "" {
 		return pv, nil
@@ -204,6 +227,10 @@ func (s *Server) executePrepare(ctx context.Context, dest *queue.Destination, bo
 		return nil, &apiError{status: status, field: field, msg: msg}
 	}
 	// Validate everything before writing anything.
+	forced := queue.JobKind("")
+	if body.Kind != nil {
+		forced = queue.JobKind(*body.Kind)
+	}
 	for _, itemID := range body.ItemIDs {
 		it, err := s.lib.Get(itemID)
 		if err != nil {
@@ -212,8 +239,14 @@ func (s *Server) executePrepare(ctx context.Context, dest *queue.Destination, bo
 		if it == nil {
 			return fail(http.StatusNotFound, "itemIds", "no such library item")
 		}
-		if _, _, err := queue.Estimate(it, dest, s.lib); err != nil {
-			return fail(http.StatusUnprocessableEntity, "itemIds", err.Error())
+		var estErr error
+		if forced == queue.KindEmberCopy && it.Platform == library.PlatformPS1 {
+			_, _, estErr = queue.EstimateEmber(it, dest)
+		} else {
+			_, _, estErr = queue.Estimate(it, dest, s.lib)
+		}
+		if estErr != nil {
+			return fail(http.StatusUnprocessableEntity, "itemIds", estErr.Error())
 		}
 	}
 	if dest.EffectiveFilesystem() != "fat32" && dest.EffectiveFilesystem() != "exfat" {
@@ -221,7 +254,7 @@ func (s *Server) executePrepare(ctx context.Context, dest *queue.Destination, bo
 			"filesystem unknown: set an explicit FAT32/exFAT choice first")
 	}
 
-	dirs, files, warnings := s.treePreview(dest, body.ItemIDs)
+	dirs, files, warnings := s.treePreview(dest, body.ItemIDs, forced)
 	_ = warnings // execute validated cleanly above; preview warnings are moot
 	disk := transfer.FileDisk{}
 	for _, d := range dirs {
@@ -239,7 +272,7 @@ func (s *Server) executePrepare(ctx context.Context, dest *queue.Destination, bo
 		res.Riptopl = staged
 	}
 
-	jobs, apiErr := s.enqueueItems(dest.ID, body.ItemIDs)
+	jobs, apiErr := s.enqueueItems(dest.ID, body.ItemIDs, forced)
 	if apiErr != nil {
 		return fail(apiErr.status, apiErr.field, apiErr.msg)
 	}
