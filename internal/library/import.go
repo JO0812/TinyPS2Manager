@@ -57,6 +57,13 @@ func ImportDir(st *Store, root string, db *TitleDB) ([]LibraryItem, error) {
 			return nil, err
 		}
 		stored[i].DiscType, stored[i].DetectionMethod = dt, m
+		// GameID extraction (spec §2.3.5): streaming SYSTEM.CNF -> BOOT2.
+		// No GameID is not an error; games still transfer, just without
+		// enrichment (art/cheats). Uncertain flag is persisted for M5.
+		if gid, uncertain, err := ExtractGameID(stored[i].SourcePath); err == nil {
+			_ = st.UpdateGameID(stored[i].ID, gid, uncertain)
+			stored[i].GameID, stored[i].GameIDUncertain = gid, uncertain
+		}
 	}
 	return stored, nil
 }

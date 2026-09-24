@@ -43,17 +43,21 @@ const (
 const CDCapacityBytes = 700 * 1024 * 1024
 
 // LibraryItem is one imported source title (spec §8). DiscGroupID links
-// multi-disc titles; it is nil for singles.
+// multi-disc titles; it is nil for singles. GameID is the PS2 disc serial
+// (e.g. SLUS_213.85) extracted from SYSTEM.CNF; GameIDUncertain marks
+// mods/translations whose serial names a different base game (spec §2.3.5).
 type LibraryItem struct {
-	ID              int64
-	SourcePath      string
-	ContentHash     string
-	Platform        Platform
-	DiscType        DiscType
-	DetectionMethod DetectionMethod
-	Title           string
-	DiscIndex       int
-	DiscGroupID     *int64
-	SizeBytes       int64
-	Status          Status
+	ID               int64
+	SourcePath       string
+	ContentHash      string
+	Platform         Platform
+	DiscType         DiscType
+	DetectionMethod  DetectionMethod
+	Title            string
+	DiscIndex        int
+	DiscGroupID      *int64
+	SizeBytes        int64
+	Status           Status
+	GameID           string
+	GameIDUncertain  bool
 }

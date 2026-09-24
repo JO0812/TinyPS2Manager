@@ -36,11 +36,52 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate library schema: %w", err)
 	}
+	if err := migrateGameID(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if _, err := db.Exec(`INSERT OR IGNORE INTO schema_version(version) VALUES (1)`); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("record schema version: %w", err)
 	}
+	if _, err := db.Exec(`INSERT OR IGNORE INTO schema_version(version) VALUES (2)`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("record schema version: %w", err)
+	}
 	return &Store{db: db}, nil
+}
+
+func migrateGameID(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(library_items)`)
+	if err != nil {
+		return fmt.Errorf("inspect library_items: %w", err)
+	}
+	defer rows.Close()
+	cols := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		cols[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if !cols["game_id"] {
+		if _, err := db.Exec(`ALTER TABLE library_items ADD COLUMN game_id TEXT`); err != nil {
+			return fmt.Errorf("add game_id: %w", err)
+		}
+	}
+	if !cols["game_id_uncertain"] {
+		if _, err := db.Exec(`ALTER TABLE library_items ADD COLUMN game_id_uncertain INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("add game_id_uncertain: %w", err)
+		}
+	}
+	return nil
 }
 
 // Close releases the database.
@@ -94,7 +135,7 @@ func (s *Store) UpsertItem(it LibraryItem) (LibraryItem, error) {
 func (s *Store) Get(id int64) (*LibraryItem, error) {
 	row := s.db.QueryRow(`SELECT id, source_path, content_hash, platform,
 		disc_type, detection_method, title, disc_index, disc_group_id,
-		size_bytes, status FROM library_items WHERE id=?`, id)
+		size_bytes, status, game_id, game_id_uncertain FROM library_items WHERE id=?`, id)
 	return scanItem(row)
 }
 
@@ -102,7 +143,7 @@ func (s *Store) Get(id int64) (*LibraryItem, error) {
 func (s *Store) GetByHash(hash string) (*LibraryItem, error) {
 	row := s.db.QueryRow(`SELECT id, source_path, content_hash, platform,
 		disc_type, detection_method, title, disc_index, disc_group_id,
-		size_bytes, status FROM library_items WHERE content_hash=?`, hash)
+		size_bytes, status, game_id, game_id_uncertain FROM library_items WHERE content_hash=?`, hash)
 	return scanItem(row)
 }
 
@@ -186,11 +227,24 @@ func (s *Store) SetGroup(id int64, groupID *int64) error {
 	return nil
 }
 
+// UpdateGameID records the extracted serial (spec §2.3.5). It never
+// clobbers a more recent value unless forced; the import path calls it
+// after detection.
+func (s *Store) UpdateGameID(id int64, gameID string, uncertain bool) error {
+	u := 0
+	if uncertain {
+		u = 1
+	}
+	_, err := s.db.Exec(`UPDATE library_items SET game_id=?, game_id_uncertain=?,
+		updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`, gameID, u, id)
+	return err
+}
+
 // List returns all items in insertion order.
 func (s *Store) List() ([]LibraryItem, error) {
 	rows, err := s.db.Query(`SELECT id, source_path, content_hash, platform,
 		disc_type, detection_method, title, disc_index, disc_group_id,
-		size_bytes, status FROM library_items ORDER BY id`)
+		size_bytes, status, game_id, game_id_uncertain FROM library_items ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +265,7 @@ func (s *Store) List() ([]LibraryItem, error) {
 func (s *Store) ListByGroupID(groupID int64) ([]LibraryItem, error) {
 	rows, err := s.db.Query(`SELECT id, source_path, content_hash, platform,
 		disc_type, detection_method, title, disc_index, disc_group_id,
-		size_bytes, status FROM library_items WHERE disc_group_id=? ORDER BY disc_index, id`, groupID)
+		size_bytes, status, game_id, game_id_uncertain FROM library_items WHERE disc_group_id=? ORDER BY disc_index, id`, groupID)
 	if err != nil {
 		return nil, err
 	}
@@ -255,9 +309,11 @@ func scanItem(r rowScanner) (*LibraryItem, error) {
 	var it LibraryItem
 	var platform, discType, method, status string
 	var group sql.NullInt64
+	var gameID sql.NullString
+	var uncertain sql.NullInt64
 	err := r.Scan(&it.ID, &it.SourcePath, &it.ContentHash, &platform,
 		&discType, &method, &it.Title, &it.DiscIndex, &group,
-		&it.SizeBytes, &status)
+		&it.SizeBytes, &status, &gameID, &uncertain)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -272,5 +328,9 @@ func scanItem(r rowScanner) (*LibraryItem, error) {
 		g := group.Int64
 		it.DiscGroupID = &g
 	}
+	if gameID.Valid {
+		it.GameID = gameID.String
+	}
+	it.GameIDUncertain = uncertain.Valid && uncertain.Int64 != 0
 	return &it, nil
 }
