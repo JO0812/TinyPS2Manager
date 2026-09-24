@@ -24,6 +24,16 @@ func HasUI() bool {
 	return true
 }
 
+// FS returns the built UI as an fs.FS for the Wails asset server (desktop
+// build); ok is false when no UI is built.
+func FS() (fs.FS, bool) {
+	if !HasUI() {
+		return nil, false
+	}
+	sub, _ := fs.Sub(distFS, "dist")
+	return sub, true
+}
+
 // Handler serves the SPA, falling back to index.html for unknown paths.
 // A missing build yields 503 with the fix.
 func Handler() http.Handler {

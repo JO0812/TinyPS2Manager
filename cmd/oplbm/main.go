@@ -1,8 +1,9 @@
 // Package main is the oplbm command-line interface (M1 milestone owner:
 // import, inspect, convert, split, tree against the real engines).
 //
-// The Wails desktop shell and HTTP API land in M2/M3; this CLI stays as the
-// scriptable, testable front end afterwards.
+// The HTTP API landed in M2; the Wails desktop shell (build tag `desktop`,
+// see desktop.go) in M4. This CLI stays as the scriptable, testable front
+// end afterwards.
 package main
 
 import (

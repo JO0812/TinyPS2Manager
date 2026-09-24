@@ -1,0 +1,15 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "TinyPS2Manager",
+  "outputfilename": "oplbm",
+  "frontend:dir": "web",
+  "frontend:install": "",
+  "frontend:build": "",
+  "frontend:dev:watcher": "",
+  "frontend:dev:serverUrl": "",
+  "info": {
+    "productName": "OPL Backup Manager",
+    "productVersion": "0.1.0",
+    "comments": "OPL/POPSTARTER backup manager"
+  }
+}
