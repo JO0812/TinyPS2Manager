@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -146,6 +147,8 @@ func (e *Executor) RunDestination(ctx context.Context, destID int64) error {
 		return err
 	}
 	defer e.store.ReleaseLock(destID, owner)
+	slog.Info("destination runner started", "destination_id", destID, "path", dest.Path)
+	defer slog.Info("destination runner stopped", "destination_id", destID)
 
 	if err := e.recover(destID); err != nil {
 		return err
@@ -211,6 +214,7 @@ func (e *Executor) recover(destID int64) error {
 	}
 	for _, j := range jobs {
 		if j.DestinationID == destID && j.Status == JobRunning {
+			slog.Warn("requeueing interrupted job", "job_id", j.ID, "destination_id", destID)
 			if err := e.store.RequeueJob(j.ID); err != nil {
 				return err
 			}
@@ -311,17 +315,22 @@ func (e *Executor) prepare(job *Job) (workItem, error) {
 func (e *Executor) fail(job *Job, err error, retryable bool) {
 	attempts, aerr := e.store.IncrementAttempts(job.ID)
 	if aerr != nil {
+		slog.Error("could not record job attempt", "job_id", job.ID, "error", aerr)
 		_ = e.store.FinishJob(job.ID, err.Error())
 		_ = e.store.SetPaused(true)
 		return
 	}
+	slog.Error("job attempt failed", "job_id", job.ID, "attempt", attempts,
+		"max_attempts", MaxAttempts, "retryable", retryable, "error", err)
 	if retryable && attempts < MaxAttempts {
 		if rerr := e.store.RequeueJob(job.ID); rerr == nil {
+			slog.Warn("job scheduled for retry", "job_id", job.ID, "attempt", attempts)
 			return
 		}
 	}
 	_ = e.store.FinishJob(job.ID, fmt.Sprintf("%s (attempt %d of %d)", err.Error(), attempts, MaxAttempts))
 	_ = e.store.SetPaused(true)
+	slog.Error("job parked after failure", "job_id", job.ID, "attempts", attempts)
 }
 
 // executeJob runs one claimed job's write + verify phases, then finishes
@@ -364,6 +373,7 @@ func (e *Executor) executeJob(ctx context.Context, dest *Destination, job *Job, 
 		return
 	}
 	_ = e.store.FinishJob(job.ID, "")
+	slog.Info("job completed", "job_id", job.ID, "kind", job.Kind)
 }
 
 func (w workItem) total() int64 {

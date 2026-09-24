@@ -75,6 +75,11 @@
     return j.phase ? j.phase + '…' : 'running…';
   }
 
+  function attemptLabel(j: Job): string {
+    if (j.attempts === 0) return '';
+    return ` · ${j.attempts} attempt${j.attempts === 1 ? '' : 's'}`;
+  }
+
   function statusClass(s: string): string {
     if (s === 'done') return 'pill-green';
     if (s === 'error') return 'pill-danger';
@@ -117,7 +122,7 @@
         <div class="job-main">
           <div class="job-title">{titles[job.libraryItemId] ?? `item ${job.libraryItemId}`}</div>
           <div class="job-sub muted">
-            {job.kind} · {formatBytes(job.bytesDone)} / {formatBytes(job.bytesTotal)} · {eta(job)}
+             {job.kind} · {formatBytes(job.bytesDone)} / {formatBytes(job.bytesTotal)} · {eta(job)}{attemptLabel(job)}
           </div>
           {#if job.status === 'running' || (job.bytesTotal > 0 && job.bytesDone > 0)}
             <div class="progress-track"><div class="progress-fill" style="width: {pct(job)}%"></div></div>

@@ -25,6 +25,7 @@ export interface Job {
   bytesTotal: number;
   bytesDone: number;
   error: string;
+  attempts: number;
   createdAt: string;
   updatedAt: string;
 }

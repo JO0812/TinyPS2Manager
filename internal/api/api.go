@@ -154,6 +154,7 @@ type jobJSON struct {
 	BytesTotal    int64  `json:"bytesTotal"`
 	BytesDone     int64  `json:"bytesDone"`
 	Error         string `json:"error"`
+	Attempts      int    `json:"attempts"`
 	CreatedAt     string `json:"createdAt"`
 	UpdatedAt     string `json:"updatedAt"`
 }
@@ -163,7 +164,7 @@ func toJobJSON(j queue.Job) jobJSON {
 		ID: j.ID, LibraryItemID: j.LibraryItemID, DestinationID: j.DestinationID,
 		Kind: string(j.Kind), Order: j.Order, Status: string(j.Status),
 		Phase: j.Phase, BytesTotal: j.BytesTotal, BytesDone: j.BytesDone,
-		Error: j.Error, CreatedAt: j.CreatedAt, UpdatedAt: j.UpdatedAt,
+		Error: j.Error, Attempts: j.Attempts, CreatedAt: j.CreatedAt, UpdatedAt: j.UpdatedAt,
 	}
 }
 

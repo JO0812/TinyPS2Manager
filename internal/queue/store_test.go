@@ -104,11 +104,18 @@ func TestRetryPauseResumeCancel(t *testing.T) {
 	if got.Status != JobError || got.Error != "boom" {
 		t.Errorf("finish = %+v", got)
 	}
+	if n, err := st.IncrementAttempts(j.ID); err != nil || n != 1 {
+		t.Fatalf("first attempt = %d, %v", n, err)
+	}
+	got, _ = st.GetJob(j.ID)
+	if got.Attempts != 1 {
+		t.Errorf("attempt count = %d, want 1", got.Attempts)
+	}
 	if err := st.RetryJob(j.ID); err != nil {
 		t.Fatal(err)
 	}
 	got, _ = st.GetJob(j.ID)
-	if got.Status != JobPending || got.Error != "" || got.BytesDone != 0 {
+	if got.Status != JobPending || got.Error != "" || got.BytesDone != 0 || got.Attempts != 0 {
 		t.Errorf("retry = %+v", got)
 	}
 	if err := st.RetryJob(j.ID); err == nil {
