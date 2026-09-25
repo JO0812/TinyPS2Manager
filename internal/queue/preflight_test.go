@@ -125,6 +125,29 @@ ok1:
 ok3:
 }
 
+func TestSpinWarn(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		hasRotation bool
+		rate        int32
+		sysfs       string
+		want        bool
+	}{
+		{"udisks flash beats lying bridge", true, -1, "1", false},
+		{"udisks unknown keeps sysfs warn", false, 0, "1", true},
+		{"udisks rpm keeps sysfs warn", true, 5400, "1", true},
+		{"udisks rpm without sysfs flag", true, 5400, "0", false},
+		{"quiet disk", false, 0, "0", false},
+		{"unreadable sysfs", false, 0, "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := spinWarn(tc.hasRotation, tc.rate, tc.sysfs); got != tc.want {
+				t.Errorf("spinWarn = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestPreflightFragmentation(t *testing.T) {
 	base := t.TempDir()
 	qs, _ := Open(":memory:")

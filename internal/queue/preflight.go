@@ -204,23 +204,50 @@ func countFiles(dir string) (int, error) {
 }
 
 func probeNonFlash(path string) (bool, string) {
-	if dev, _, err := deviceForPath(path); err == nil && dev != "" {
-		disk := diskForPartition(dev)
-		if disk != "" {
-			if data, err := os.ReadFile(filepath.Join("/sys/block", disk, "queue/rotational")); err == nil {
-				if strings.TrimSpace(string(data)) == "1" {
-					return true, "device appears to be spinning HDD (recommend plain flash pendrive; PS2 ports brown out enclosures, spec §2.11)"
-				}
-			}
-			if data, err := os.ReadFile(filepath.Join("/sys/block", disk, "device/model")); err == nil {
-				m := strings.ToUpper(strings.TrimSpace(string(data)))
-				if strings.Contains(m, "SD") || strings.Contains(m, "MMC") || strings.Contains(m, "READER") {
-					return true, fmt.Sprintf("device model %q suggests SD/MMC adapter (mass:/ freezes on some units, spec §2.11)", strings.TrimSpace(string(data)))
-				}
-			}
+	dev, _, err := deviceForPath(path)
+	if err != nil || dev == "" {
+		return false, ""
+	}
+	disk := diskForPartition(dev)
+	if disk == "" {
+		return false, ""
+	}
+	rotational := ""
+	if data, err := os.ReadFile(filepath.Join("/sys/block", disk, "queue/rotational")); err == nil {
+		rotational = strings.TrimSpace(string(data))
+	}
+	rate, hasRot := udisksRotation(dev)
+	if spinWarn(hasRot, rate, rotational) {
+		return true, "device appears to be spinning HDD (recommend plain flash pendrive; PS2 ports brown out enclosures, spec §2.11)"
+	}
+	if data, err := os.ReadFile(filepath.Join("/sys/block", disk, "device/model")); err == nil {
+		m := strings.ToUpper(strings.TrimSpace(string(data)))
+		if strings.Contains(m, "SD") || strings.Contains(m, "MMC") || strings.Contains(m, "READER") {
+			return true, fmt.Sprintf("device model %q suggests SD/MMC adapter (mass:/ freezes on some units, spec §2.11)", strings.TrimSpace(string(data)))
 		}
 	}
 	return false, ""
+}
+
+// spinWarn decides the spinning-disk warning. UDisks2 rotation evidence is
+// authoritative when present (USB bridges lie: flash behind a SATA bridge
+// reports rotational=1); otherwise the sysfs flag stands, conservatively.
+func spinWarn(hasRotation bool, rotationRate int32, sysfsRotational string) bool {
+	if hasRotation && rotationRate < 0 {
+		return false
+	}
+	return sysfsRotational == "1"
+}
+
+// udisksRotation returns the drive's UDisks2 rotation rate for dev.
+// ok=false on any failure or absence — callers keep their previous
+// behavior instead of guessing.
+func udisksRotation(dev string) (rate int32, ok bool) {
+	info, err := fsinfo.UdisksLookup(dev)
+	if err != nil || !info.HasRotation {
+		return 0, false
+	}
+	return info.RotationRate, true
 }
 
 func deviceForPath(path string) (device, mount string, err error) {
@@ -293,6 +320,15 @@ func probePartitionTable(path string, kind DestinationKind) (string, string, err
 	if err != nil {
 		return "unknown", fmt.Sprintf("partition table check skipped: %v", err), nil
 	}
+	// Prefer UDisks2 (no root needed); fall back to MBR reads below.
+	if info, uerr := fsinfo.UdisksLookup(dev); uerr == nil && info.Table != "" {
+		switch info.Table {
+		case "dos":
+			return "dos", "MBR (dos) partition table (via UDisks2)", nil
+		case "gpt":
+			return "gpt", "partition table is GPT (via UDisks2) — repartition with MBR", nil
+		}
+	}
 	diskDev := diskForPartition(dev)
 	diskPath := filepath.Join("/dev", diskDev)
 	f, err := os.Open(diskPath)
@@ -333,6 +369,17 @@ func probePartitionType(path string) (string, string, error) {
 	dev, _, err := deviceForPath(path)
 	if err != nil {
 		return "", fmt.Sprintf("partition type check skipped: %v", err), nil
+	}
+	// Prefer UDisks2 (no root needed). On GPT the type is a GUID, not a
+	// 0x.. byte — the table check already owns the GPT verdict, so skip
+	// here instead of double-failing.
+	if info, uerr := fsinfo.UdisksLookup(dev); uerr == nil {
+		if info.Table == "dos" && info.PartType != "" {
+			return info.PartType, "", nil
+		}
+		if info.Table == "gpt" {
+			return "", "GPT partition table: see partition-table check", nil
+		}
 	}
 	diskDev := diskForPartition(dev)
 	diskPath := filepath.Join("/dev", diskDev)
