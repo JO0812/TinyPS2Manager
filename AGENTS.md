@@ -28,6 +28,9 @@ Wails bundle (needs `wails` CLI + GTK/WebKit on Linux):
 ```
 go install github.com/wailsapp/wails/v2/cmd/wails@latest
 # Linux: sudo apt install libwebkit2gtk-4.1-dev  (wails doctor otherwise fails, but CI covers it)
+# If only 4.1 headers exist, Wails still asks pkg-config for webkit2gtk-4.0:
+# shim it user-locally with: cp /usr/lib/x86_64-linux-gnu/pkgconfig/webkit2gtk-4.1.pc ~/.local/lib/pkgconfig/webkit2gtk-4.0.pc
+# and export PKG_CONFIG_PATH="$HOME/.local/lib/pkgconfig"
 wails build -tags desktop                          # -> build/bin/oplbm
 ```
 
