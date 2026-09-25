@@ -182,6 +182,8 @@ export const api = {
     post<Destination>('/api/destinations', body),
   patchDestination: (id: number, body: { bdmPrefix?: string; filesystemOverride?: string }) =>
     patch<Destination>(`/api/destinations/${id}`, body),
+  deleteDestination: (id: number) =>
+    req<{ deleted: boolean }>('DELETE', `/api/destinations/${id}`),
   preflight: (id: number) => get<PreflightResult>(`/api/destinations/${id}/preflight`),
 
   queue: () => get<Job[]>('/api/queue'),

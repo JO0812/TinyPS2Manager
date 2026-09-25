@@ -538,6 +538,45 @@ func TestIntegrationDestinationsReachable(t *testing.T) {
 	if got, ok := byPath[dead]; !ok || got.Reachable {
 		t.Errorf("dead dest reachable = %+v, want false", got)
 	}
+	// DELETE removes an unused destination…
+	if code, _ := h.do("DELETE", fmt.Sprintf("/api/destinations/%d", created.ID), nil); code != http.StatusOK {
+		t.Fatalf("delete = %d", code)
+	}
+	if code := h.get("/api/destinations", &dests); code != http.StatusOK {
+		t.Fatalf("list = %d", code)
+	}
+	for _, d := range dests {
+		if d.Path == live {
+			t.Fatalf("deleted destination survives: %+v", d)
+		}
+	}
+	// …404s on unknown ids…
+	if code, _ := h.do("DELETE", "/api/destinations/9999", nil); code != http.StatusNotFound {
+		t.Fatalf("delete missing = %d, want 404", code)
+	}
+	// …and 409s while jobs reference the destination.
+	var withJobs destinationJSON
+	if code, raw := h.do("POST", "/api/destinations",
+		map[string]string{"path": live}); code != http.StatusCreated {
+		t.Fatalf("create dest = %d\n%s", code, raw)
+	} else if err := json.Unmarshal(raw, &withJobs); err != nil {
+		t.Fatal(err)
+	}
+	jobs, err := h.qstore().Enqueue([]queue.Job{{LibraryItemID: 1, DestinationID: withJobs.ID, Kind: queue.KindCopy}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := h.do("DELETE", fmt.Sprintf("/api/destinations/%d", withJobs.ID), nil); code != http.StatusConflict {
+		t.Fatalf("delete with jobs = %d, want 409", code)
+	}
+	for _, j := range jobs {
+		if err := h.qstore().CancelJob(j.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if code, _ := h.do("DELETE", fmt.Sprintf("/api/destinations/%d", withJobs.ID), nil); code != http.StatusOK {
+		t.Fatalf("delete after cancel = %d, want 200", code)
+	}
 }
 
 func TestIntegrationSSE(t *testing.T) {

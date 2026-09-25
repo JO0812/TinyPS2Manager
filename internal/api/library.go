@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 
@@ -305,6 +306,32 @@ func (s *Server) handleDestinationsPatch(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, toDestinationJSON(*updated))
+}
+
+func (s *Server) handleDestinationsDelete(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "id", err.Error())
+		return
+	}
+	d, err := s.qstore.GetDestination(id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "", err.Error())
+		return
+	}
+	if d == nil {
+		writeErr(w, http.StatusNotFound, "id", "no such destination")
+		return
+	}
+	if err := s.qstore.DeleteDestination(id); err != nil {
+		if errors.Is(err, queue.ErrDestinationHasJobs) {
+			writeErr(w, http.StatusConflict, "id", err.Error())
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, "", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
 }
 
 func (s *Server) handleSettingsGet(w http.ResponseWriter, r *http.Request) {

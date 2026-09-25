@@ -89,10 +89,33 @@ function check(name, ok, extra = '') {
           .then((vs) => (vs.find((v) => v.path === path) || {}).added),
       target.path);
       check('pick-marks-added', addedFlag === true, `added=${addedFlag}`);
+
+      // Remove it again through the row ✕ button (confirm auto-accepted).
+      page.on('dialog', (d) => d.accept());
+      const rowsBefore = await page.evaluate(() => document.querySelectorAll('.drive-row').length);
+      await page.evaluate((path) => {
+        const btn = document.querySelector(`.drive-row button[aria-label="Remove ${path}"]`);
+        if (!btn) throw new Error('missing remove button for ' + path);
+        btn.click();
+      }, target.path);
+      await page.waitForFunction(
+        (n) => document.querySelectorAll('.drive-row').length === n - 1,
+        { timeout: 10000 },
+        rowsBefore,
+      );
+      check('remove-via-ui', true);
+      const stillThere = await page.evaluate((path) =>
+        fetch('/api/destinations')
+          .then((r) => r.json())
+          .then((ds) => ds.some((d) => d.path === path)),
+      target.path);
+      check('remove-persisted', stillThere === false, `still listed=${stillThere}`);
     } else {
       check('pick-fills-form', true, 'all vols already added; skipped');
       check('pick-add-tracks', true, 'skipped');
       check('pick-marks-added', true, 'skipped');
+      check('remove-via-ui', true, 'skipped');
+      check('remove-persisted', true, 'skipped');
     }
   }
 

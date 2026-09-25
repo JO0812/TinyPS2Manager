@@ -39,6 +39,20 @@
     localStorage.setItem('oplbm.destId', String(id));
   }
 
+  async function removeDrive(d: Destination) {
+    if (!confirm(`Remove destination ${d.path}?\nDestinations with queued jobs cannot be removed.`)) return;
+    notice = '';
+    try {
+      await api.deleteDestination(d.id);
+      notice = 'Destination removed.';
+      noticeKind = 'ok';
+      await refresh();
+    } catch (e) {
+      notice = e instanceof Error ? e.message : String(e);
+      noticeKind = 'err';
+    }
+  }
+
   async function addDrive() {
     if (!newPath.trim()) return;
     notice = '';
@@ -201,13 +215,16 @@
       <p class="muted">None yet — add your USB stick or staging folder below.</p>
     {/if}
     {#each destinations as d}
-      <button class="drive" class:active={d.id === selectedId} onclick={() => pick(d.id)}>
-        <span class="drive-path">{d.path}</span>
-        <span class="pill {(d.fsOverride || d.filesystem) === 'unknown' ? 'pill-gray' : 'pill-green'}" title={d.fsOverride ? 'explicit override' : 'detected'}>
-          {(d.fsOverride || d.filesystem).toUpperCase()}{d.fsOverride ? '*' : ''}
-        </span>
-        <span class="muted small">{d.kind}{d.bdmPrefix ? ` · ${d.bdmPrefix}` : ''}</span>
-      </button>
+      <div class="drive-row">
+        <button class="drive" class:active={d.id === selectedId} onclick={() => pick(d.id)}>
+          <span class="drive-path">{d.path}</span>
+          <span class="pill {(d.fsOverride || d.filesystem) === 'unknown' ? 'pill-gray' : 'pill-green'}" title={d.fsOverride ? 'explicit override' : 'detected'}>
+            {(d.fsOverride || d.filesystem).toUpperCase()}{d.fsOverride ? '*' : ''}
+          </span>
+          <span class="muted small">{d.kind}{d.bdmPrefix ? ` · ${d.bdmPrefix}` : ''}</span>
+        </button>
+        <button class="btn-ghost small danger" title="Remove destination" aria-label="Remove {d.path}" onclick={() => removeDrive(d)}>✕</button>
+      </div>
     {/each}
     <h3>Add destination</h3>
     {#if volumes.length > 0}
@@ -358,6 +375,20 @@
     border: 1px solid var(--border);
     border-radius: 10px;
     margin-bottom: 8px;
+  }
+  .drive-row {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+    margin-bottom: 8px;
+  }
+  .drive-row .drive {
+    flex: 1;
+    margin-bottom: 0;
+  }
+  .drive-row .danger {
+    color: var(--danger);
+    flex-shrink: 0;
   }
   .drive:hover {
     background: var(--surface-hover);

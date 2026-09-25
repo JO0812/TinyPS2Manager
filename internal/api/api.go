@@ -50,6 +50,7 @@ func New(qstore *queue.Store, lib *library.Store, settingsPath string, exec *que
 		r.Get("/destinations/volumes", s.handleVolumesList)
 		r.Post("/destinations", s.handleDestinationsCreate)
 		r.Patch("/destinations/{id}", s.handleDestinationsPatch)
+		r.Delete("/destinations/{id}", s.handleDestinationsDelete)
 		r.Post("/destinations/{id}/prepare", s.handlePrepare)
 		r.Get("/destinations/{id}/preflight", s.handlePreflight)
 		r.Post("/queue", s.handleQueueEnqueue)

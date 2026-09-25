@@ -197,6 +197,32 @@ func (s *Store) UpdateDestinationOverride(id int64, override string) error {
 	return expectOne(res, id, "override (missing destination)")
 }
 
+// ErrDestinationHasJobs is returned by DeleteDestination when jobs still
+// reference the destination.
+var ErrDestinationHasJobs = fmt.Errorf("destination has jobs")
+
+// DeleteDestination removes a tracked destination. It refuses when jobs
+// still reference it (remove or finish them first) and drops any lock row
+// alongside, so a re-added drive starts clean.
+func (s *Store) DeleteDestination(id int64) error {
+	var n int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM jobs WHERE destination_id=?`, id).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		return fmt.Errorf("%w: destination %d has %d job(s)", ErrDestinationHasJobs, id, n)
+	}
+	res, err := s.db.Exec(`DELETE FROM destinations WHERE id=?`, id)
+	if err != nil {
+		return err
+	}
+	if err := expectOne(res, id, "destination (missing destination)"); err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`DELETE FROM dest_locks WHERE destination_id=?`, id)
+	return err
+}
+
 // RefreshDestinationStats records freshly probed filesystem/free space.
 func (s *Store) RefreshDestinationStats(id int64, filesystem string, freeBytes, totalBytes int64) error {
 	_, err := s.db.Exec(`UPDATE destinations SET filesystem=?, free_bytes=?, total_bytes=?,

@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -56,6 +57,35 @@ func TestDestinationCRUD(t *testing.T) {
 	}
 	if _, err := st.AddDestination(Destination{Path: "/x", Kind: "tape"}); err == nil {
 		t.Error("bad kind: expected error")
+	}
+}
+
+func TestDeleteDestination(t *testing.T) {
+	st := openTestStore(t)
+	d, err := st.AddDestination(Destination{Path: "/mnt/gone", Kind: DestDrive})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Refused while jobs reference it.
+	if _, err := st.Enqueue([]Job{{LibraryItemID: 1, DestinationID: d.ID, Kind: KindCopy}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DeleteDestination(d.ID); !errors.Is(err, ErrDestinationHasJobs) {
+		t.Fatalf("delete with jobs = %v, want ErrDestinationHasJobs", err)
+	}
+	// After cancelling the job, delete succeeds and the row is gone.
+	jobs, _ := st.ListJobs()
+	if err := st.CancelJob(jobs[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DeleteDestination(d.ID); err != nil {
+		t.Fatalf("delete = %v", err)
+	}
+	if got, _ := st.GetDestination(d.ID); got != nil {
+		t.Errorf("deleted destination survives: %+v", got)
+	}
+	if err := st.DeleteDestination(9999); err == nil {
+		t.Error("delete missing: expected error")
 	}
 }
 
