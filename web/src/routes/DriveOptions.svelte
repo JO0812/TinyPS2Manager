@@ -58,28 +58,67 @@
     }
   }
 
-  async function savePrefix(dest: Destination, prefix: string) {
+  // Pending values keep the user's choice on screen while its PATCH +
+  // refresh round-trips; without them the controls snap back to the stale
+  // server value on every unrelated re-render and rapid changes pile up.
+  // Per-field tokens make overlap safe: only the latest save of each field
+  // may clear its pending display, so an older save resolving late can't
+  // revert a newer choice.
+  let pendingFs: string | null = null;
+  let pendingPrefix: string | null = null;
+  let fsBusy = false;
+  let prefixBusy = false;
+  let fsSeq = 0;
+  let prefixSeq = 0;
+
+  async function savePrefix(id: number, prefix: string) {
+    const mine = ++prefixSeq;
+    pendingPrefix = prefix;
+    prefixBusy = true;
+    notice = '';
     try {
-      await api.patchDestination(dest.id, { bdmPrefix: prefix });
+      await api.patchDestination(id, { bdmPrefix: prefix });
       await refresh();
+      await loadPreflight(id);
     } catch (e) {
+      if (mine !== prefixSeq) return;
       notice = e instanceof Error ? e.message : String(e);
       noticeKind = 'err';
+    } finally {
+      if (mine === prefixSeq) {
+        pendingPrefix = null;
+        prefixBusy = false;
+      }
     }
   }
 
-  async function saveFs(dest: Destination, ov: string) {
+  async function saveFs(id: number, ov: string) {
+    const mine = ++fsSeq;
+    pendingFs = ov;
+    fsBusy = true;
+    notice = '';
     try {
-      await api.patchDestination(dest.id, { filesystemOverride: ov });
+      await api.patchDestination(id, { filesystemOverride: ov });
       await refresh();
+      await loadPreflight(id);
     } catch (e) {
+      if (mine !== fsSeq) return;
       notice = e instanceof Error ? e.message : String(e);
       noticeKind = 'err';
+    } finally {
+      if (mine === fsSeq) {
+        pendingFs = null;
+        fsBusy = false;
+      }
     }
   }
 
   $: dest = destinations.find((d) => d.id === selectedId);
   $: itemIds = items.map((i) => i.id);
+  // What the controls show: the in-flight choice wins over the last
+  // server snapshot so edits never visibly revert mid-save.
+  $: fsShown = pendingFs ?? dest?.fsOverride ?? '';
+  $: prefixShown = pendingPrefix ?? dest?.bdmPrefix ?? '';
 
   function fsText(d: Destination): string {
     const base = `${d.filesystem.toUpperCase()} (${formatBytes(d.freeBytes)} free`;
@@ -90,23 +129,33 @@
   let preflightBusy = false;
   let preflightError = '';
 
-  async function loadPreflight() {
-    if (!dest) return;
+  // Sequence guard: overlapping loads resolve in any order; only the
+  // latest may paint. Without it a slow earlier response clobbers newer
+  // state after rapid dropdown changes.
+  let preflightSeq = 0;
+
+  async function loadPreflight(id: number) {
+    const seq = ++preflightSeq;
     preflightBusy = true;
     preflightError = '';
     try {
-      preflight = await api.preflight(dest.id);
+      const res = await api.preflight(id);
+      if (seq !== preflightSeq) return; // stale: a newer load is in flight
+      preflight = res;
     } catch (e) {
+      if (seq !== preflightSeq) return;
       preflightError = e instanceof Error ? e.message : String(e);
       preflight = null;
     } finally {
-      preflightBusy = false;
+      if (seq === preflightSeq) preflightBusy = false;
     }
   }
 
-  $: if (dest) {
-    // auto-load preflight when selection changes (fire-and-forget)
-    loadPreflight();
+  // Auto-load only when the SELECTION changes. destinations is replaced on
+  // every refresh (new object identities), so keying off `dest` refired a
+  // preflight fetch after every save — piling requests on slow devices.
+  $: if (selectedId) {
+    void loadPreflight(selectedId);
   }
 
   onMount(() => {
@@ -165,20 +214,32 @@
       </dl>
       <label>
         Filesystem override
-        <select value={dest.fsOverride} onchange={(e) => saveFs(dest, e.currentTarget.value)}>
+        <select
+          value={fsShown}
+          aria-busy={fsBusy}
+          onchange={(e) => saveFs(dest.id, e.currentTarget.value)}
+        >
           <option value="">Auto-detect</option>
           <option value="fat32">FAT32 (safe default)</option>
           <option value="exfat">exFAT</option>
         </select>
+        {#if fsBusy}<span class="muted small">Saving…</span>{/if}
       </label>
       <label>
         BDM prefix
-        <input class="field" value={dest.bdmPrefix} onchange={(e) => savePrefix(dest, e.currentTarget.value)} placeholder="(drive root)" />
+        <input
+          class="field"
+          value={prefixShown}
+          aria-busy={prefixBusy}
+          onchange={(e) => savePrefix(dest.id, e.currentTarget.value)}
+          placeholder="(drive root)"
+        />
+        {#if prefixBusy}<span class="muted small">Saving…</span>{/if}
       </label>
 
       <div class="preflight">
         <h3>Pre-flight checks</h3>
-        <button class="btn-ghost small" onclick={loadPreflight} disabled={preflightBusy}>
+        <button class="btn-ghost small" onclick={() => loadPreflight(selectedId)} disabled={preflightBusy || !selectedId}>
           {preflightBusy ? 'Checking…' : 'Re-check'}
         </button>
         {#if preflightError}
