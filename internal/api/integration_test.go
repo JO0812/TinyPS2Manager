@@ -459,6 +459,55 @@ func makeSparseSerialISO(t *testing.T, dir string) string {
 	return path
 }
 
+func TestIntegrationVolumes(t *testing.T) {
+	h, cancel := newAPIHarness(t)
+	defer cancel()
+	// Contract: always 200 with an array of volume objects. Entries (if
+	// any) must carry non-empty paths and known JSON keys.
+	var vols []map[string]any
+	if code := h.get("/api/destinations/volumes", &vols); code != http.StatusOK {
+		t.Fatalf("volumes = %d", code)
+	}
+	if vols == nil {
+		t.Fatal("volumes is null, want []")
+	}
+	for _, v := range vols {
+		if v["path"] == "" {
+			t.Errorf("volume with empty path: %v", v)
+		}
+		for _, k := range []string{"label", "filesystem", "freeBytes", "totalBytes", "removable", "added"} {
+			if _, ok := v[k]; !ok {
+				t.Errorf("volume lacks %s: %v", k, v)
+			}
+		}
+		if v["added"] != false {
+			t.Errorf("fresh db: volume should not be marked added: %v", v)
+		}
+	}
+	// Tracking a listed volume as a destination flips its added flag.
+	// Creating the destination row writes nothing to the mount itself
+	// (DB row + read-only stat/probe), so this is safe on real volumes.
+	// Skipped on machines with no detected volumes.
+	if len(vols) > 0 {
+		target := vols[0]["path"].(string)
+		var dest destinationJSON
+		if code, raw := h.do("POST", "/api/destinations",
+			map[string]string{"path": target, "kind": "drive"}); code != http.StatusCreated {
+			t.Fatalf("create dest = %d\n%s", code, raw)
+		} else if err := json.Unmarshal(raw, &dest); err != nil {
+			t.Fatal(err)
+		}
+		if code := h.get("/api/destinations/volumes", &vols); code != http.StatusOK {
+			t.Fatalf("volumes = %d", code)
+		}
+		for _, v := range vols {
+			if v["path"] == target && v["added"] != true {
+				t.Errorf("tracked volume not marked added: %v", v)
+			}
+		}
+	}
+}
+
 func TestIntegrationSSE(t *testing.T) {
 	h, cancel := newAPIHarness(t)
 	defer cancel()

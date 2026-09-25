@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, formatBytes, type Destination, type LibraryItem } from '../lib/api';
+  import { api, formatBytes, type Destination, type LibraryItem, type Volume } from '../lib/api';
   import PrepareDialog from '../components/PrepareDialog.svelte';
 
   let destinations: Destination[] = [];
+  let volumes: Volume[] = [];
   let selectedId = 0;
   let items: LibraryItem[] = [];
   let showPrepare = false;
@@ -11,6 +12,7 @@
   let noticeKind: 'ok' | 'err' = 'ok';
 
   // Add-drive form.
+  let pickedVolume = '';
   let newPath = '';
   let newKind = 'folder';
   let newFs = '';
@@ -18,9 +20,10 @@
 
   async function refresh() {
     try {
-      const [dests, libs] = await Promise.all([api.destinations(), api.library()]);
+      const [dests, libs, vols] = await Promise.all([api.destinations(), api.library(), api.volumes()]);
       destinations = dests;
       items = libs;
+      volumes = vols;
       if (!dests.some((d) => d.id === selectedId)) {
         selectedId = dests[0]?.id ?? 0;
         localStorage.setItem('oplbm.destId', String(selectedId));
@@ -48,6 +51,7 @@
       });
       newPath = '';
       newPrefix = '';
+      pickedVolume = '';
       await refresh();
       pick(d.id);
       notice = 'Destination added.';
@@ -56,6 +60,23 @@
       notice = e instanceof Error ? e.message : String(e);
       noticeKind = 'err';
     }
+  }
+
+  // Picking a detected drive fills the form (kind=drive); picking one that
+  // is already tracked just selects it. Nothing is created until Add.
+  function onPickVolume(path: string) {
+    pickedVolume = path;
+    if (!path) return;
+    const existing = destinations.find((d) => d.path === path);
+    if (existing) {
+      pick(existing.id);
+      notice = 'Already in the list — selected.';
+      noticeKind = 'ok';
+      return;
+    }
+    newPath = path;
+    newKind = 'drive';
+    newFs = '';
   }
 
   // Pending values keep the user's choice on screen while its PATCH +
@@ -188,6 +209,21 @@
       </button>
     {/each}
     <h3>Add destination</h3>
+    {#if volumes.length > 0}
+      <label>
+        Detected drives
+        <select value={pickedVolume} onchange={(e) => onPickVolume(e.currentTarget.value)} aria-label="Detected drives">
+          <option value="">Choose a drive…</option>
+          {#each volumes as v}
+            <option value={v.path} disabled={v.added}>
+              {v.label} — {(v.filesystem || 'unknown').toUpperCase()} · {formatBytes(v.freeBytes)}{v.added ? ' (added)' : ''}
+            </option>
+          {/each}
+        </select>
+      </label>
+    {:else}
+      <p class="muted small">No removable drives detected — type a path below.</p>
+    {/if}
     <input class="field" bind:value={newPath} placeholder="/media/usb  or  /home/you/staging" aria-label="New destination path" />
     <div class="row">
       <select bind:value={newKind} aria-label="Kind">
@@ -338,12 +374,21 @@
     flex-wrap: wrap;
   }
   .row select,
-  .detail select {
+  .detail select,
+  .drives select {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 10px;
     padding: 8px 10px;
     color: var(--fg);
+  }
+  .drives label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 10px 0 4px;
+    color: var(--fg-muted);
+    font-size: 13px;
   }
   .detail dl {
     margin: 0 0 12px;

@@ -63,6 +63,16 @@ export interface Destination {
   updatedAt: string;
 }
 
+export interface Volume {
+  path: string;
+  label: string;
+  filesystem: string;
+  freeBytes: number;
+  totalBytes: number;
+  removable: boolean;
+  added: boolean;
+}
+
 export interface Settings {
   theme: 'system' | 'light' | 'dark';
   stagingDir: string;
@@ -166,6 +176,7 @@ export const api = {
   enrichment: (id: number) => get<Enrichment>(`/api/library/${id}/enrichment`),
 
   destinations: () => get<Destination[]>('/api/destinations'),
+  volumes: () => get<Volume[]>('/api/destinations/volumes'),
   createDestination: (body: { path: string; kind?: string; filesystemOverride?: string; bdmPrefix?: string }) =>
     post<Destination>('/api/destinations', body),
   patchDestination: (id: number, body: { bdmPrefix?: string; filesystemOverride?: string }) =>

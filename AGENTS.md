@@ -52,7 +52,7 @@ scripts/e2e.sh                                     # CLI + API + browser UI; UI 
 * `internal/usbextreme` — `1 GiB` chunk writer (`ul.cfg` + `ul.*` at device root, never inside `DVD/`)
 * `internal/oplfs` — `DVD/CD/POPS/EMBER/ART/CHT/APPS/...` tree builder + `DISCS.TXT` (≤4×73) / `VMCDIR.TXT` (1×103) validators
 * `internal/queue` — SQLite `jobs/destinations` + per-device mutex + DB lease, prep-ahead pool, `0. oplbm.*` temp + `os.Rename`, SHA-256 verify, pause/resume, `attempts` cap 3, `Preflight`
-* `internal/transfer` + `internal/transfer/fsinfo` — `FileDisk` abstraction, per-OS `Probe` (`linux: /proc/mounts` + `Statfs`, `darwin: Statfs`, `windows: GetVolumeInformationW`)
+* `internal/transfer` + `internal/transfer/fsinfo` — `FileDisk` abstraction, per-OS `Probe` (`linux: /proc/mounts` + `Statfs`, `darwin: Statfs`, `windows: GetVolumeInformationW`), `Volumes()` removable-drive picker (`linux: /dev/sd|mmcblk + /media|/run/media|/mnt + by-label`, `darwin: /Volumes`, `windows: logical drives`)
 * `internal/api` — `chi` REST + SSE (`/api/library`, `/api/destinations`, `/api/queue`, `/api/enrich/{art,cheats,riptopl}`, `/api/destinations/{id}/preflight`)
 * `internal/{riptopl,art,cheats}` — loader/art/cheat fetchers (stdlib `net/http` + `image/png` only)
 * `internal/{logging,config,invariants}` — rotating `slog` JSON sink (`~/.oplbm/logs/`, 10 MiB×5)

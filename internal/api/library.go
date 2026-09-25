@@ -159,6 +159,41 @@ func (s *Server) handleDestinationsList(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, out)
 }
 
+// volumeJSON is one detected external drive plus whether it is already
+// tracked as a destination (matched by path).
+type volumeJSON struct {
+	Path       string `json:"path"`
+	Label      string `json:"label"`
+	Filesystem string `json:"filesystem"`
+	FreeBytes  int64  `json:"freeBytes"`
+	TotalBytes int64  `json:"totalBytes"`
+	Removable  bool   `json:"removable"`
+	Added      bool   `json:"added"`
+}
+
+func (s *Server) handleVolumesList(w http.ResponseWriter, r *http.Request) {
+	vols, err := transfer.Volumes()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "", err.Error())
+		return
+	}
+	added := map[string]bool{}
+	if dests, err := s.qstore.ListDestinations(); err == nil {
+		for _, d := range dests {
+			added[d.Path] = true
+		}
+	}
+	out := make([]volumeJSON, 0, len(vols))
+	for _, v := range vols {
+		out = append(out, volumeJSON{
+			Path: v.Path, Label: v.Label, Filesystem: string(v.Filesystem),
+			FreeBytes: v.FreeBytes, TotalBytes: v.TotalBytes,
+			Removable: v.Removable, Added: added[v.Path],
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (s *Server) handleDestinationsCreate(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Path               string `json:"path"`

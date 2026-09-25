@@ -46,3 +46,36 @@ func mapFilesystem(raw string) Filesystem {
 		return FSUnknown
 	}
 }
+
+// Volume is one detected external-drive candidate for the destination
+// picker: the user selects it instead of typing a path.
+type Volume struct {
+	Path       string
+	Label      string
+	Filesystem Filesystem
+	FreeBytes  int64
+	TotalBytes int64
+	Removable  bool
+}
+
+// Volumes lists detected external drives (fsinfo per OS). Empty (not an
+// error) on platforms without detection — callers keep the manual path
+// form as fallback.
+func Volumes() ([]Volume, error) {
+	raw, err := fsinfo.Volumes()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Volume, 0, len(raw))
+	for _, v := range raw {
+		out = append(out, Volume{
+			Path:       v.Path,
+			Label:      v.Label,
+			Filesystem: mapFilesystem(v.Filesystem),
+			FreeBytes:  v.FreeBytes,
+			TotalBytes: v.TotalBytes,
+			Removable:  v.Removable,
+		})
+	}
+	return out, nil
+}
