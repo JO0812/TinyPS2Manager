@@ -43,8 +43,14 @@
 
   <div class="dest-space">
     {#if dest}
+      {#if dest.reachable === false}
+        <div class="space-row">
+          <strong>Drive unplugged?</strong>
+          <span class="muted">path is missing — plug it back in to resume</span>
+        </div>
+      {:else}
       <div class="space-row">
-        <strong>{hasCapacity ? `${formatBytes(used)} used` : `${formatBytes(dest.freeBytes)} free`}</strong>
+        <strong>{hasCapacity ? `${formatBytes(used)} used` : dest.freeBytes < 0 ? 'size unknown' : `${formatBytes(dest.freeBytes)} free`}</strong>
         <span class="muted">
           {#if hasCapacity}
             {formatBytes(dest.freeBytes)} free of {formatBytes(dest.totalBytes)}
@@ -53,6 +59,7 @@
           {/if}
         </span>
       </div>
+      {/if}
       {#if hasCapacity}
         <div class="progress-track"><div class="progress-fill" style="width: {usedPct}%"></div></div>
       {/if}

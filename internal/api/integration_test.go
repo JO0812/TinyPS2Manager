@@ -508,6 +508,38 @@ func TestIntegrationVolumes(t *testing.T) {
 	}
 }
 
+func TestIntegrationDestinationsReachable(t *testing.T) {
+	h, cancel := newAPIHarness(t)
+	defer cancel()
+	live := t.TempDir()
+	var created destinationJSON
+	if code, raw := h.do("POST", "/api/destinations",
+		map[string]string{"path": live}); code != http.StatusCreated {
+		t.Fatalf("create dest = %d\n%s", code, raw)
+	} else if err := json.Unmarshal(raw, &created); err != nil {
+		t.Fatal(err)
+	}
+	// Bypass create-time validation to track a dead (unplugged) path.
+	dead := filepath.Join(t.TempDir(), "unplugged")
+	if _, err := h.qstore().AddDestination(queue.Destination{Path: dead, Kind: queue.DestDrive}); err != nil {
+		t.Fatal(err)
+	}
+	var dests []destinationJSON
+	if code := h.get("/api/destinations", &dests); code != http.StatusOK {
+		t.Fatalf("list = %d", code)
+	}
+	byPath := map[string]destinationJSON{}
+	for _, d := range dests {
+		byPath[d.Path] = d
+	}
+	if got, ok := byPath[live]; !ok || !got.Reachable {
+		t.Errorf("live dest reachable = %+v, want true", got)
+	}
+	if got, ok := byPath[dead]; !ok || got.Reachable {
+		t.Errorf("dead dest reachable = %+v, want false", got)
+	}
+}
+
 func TestIntegrationSSE(t *testing.T) {
 	h, cancel := newAPIHarness(t)
 	defer cancel()

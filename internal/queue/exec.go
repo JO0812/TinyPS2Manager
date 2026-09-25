@@ -73,8 +73,11 @@ func (e *Executor) Run(ctx context.Context) error {
 			case err := <-r.done:
 				delete(runners, id)
 				// Returns while the supervisor lives are real failures
-				// (lease/config), not shutdown: cool the destination.
+				// (lease/config), not shutdown: log (a silent crash loop
+				// here once hid a dead destination for weeks) and cool
+				// the destination.
 				if err != nil && ctx.Err() == nil {
+					slog.Error("destination runner failed", "destination_id", id, "error", err)
 					cooled[id] = time.Now()
 				}
 			default:
@@ -142,6 +145,13 @@ func (e *Executor) RunDestination(ctx context.Context, destID int64) error {
 	if dest == nil {
 		return fmt.Errorf("no destination %d", destID)
 	}
+	// Park while the destination path is gone (unplugged stick): poll
+	// for reappearance instead of failing into the error cooldown, so a
+	// missing mount no longer crash-loops the runner every ~32s and a
+	// replugged drive resumes on its own.
+	if err := e.waitForPath(ctx, dest); err != nil {
+		return err
+	}
 	owner := ownerString()
 	if err := e.store.AcquireLock(destID, owner); err != nil {
 		return err
@@ -202,6 +212,37 @@ func (e *Executor) RunDestination(ctx context.Context, destID int64) error {
 			continue
 		}
 		e.executeJob(ctx, dest, job, outcome.work)
+	}
+}
+
+// waitForPath blocks until dest.Path exists. A missing path (unplugged
+// drive) parks here with one warn — not an error return — so the
+// supervisor doesn't churn through its 30s failure cooldown and the
+// runner resumes by itself on replug. Non-ENOENT stat failures still
+// return as errors.
+func (e *Executor) waitForPath(ctx context.Context, dest *Destination) error {
+	if _, err := os.Stat(dest.Path); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	slog.Warn("destination path missing, parking runner until it reappears",
+		"destination_id", dest.ID, "path", dest.Path)
+	t := time.NewTicker(10 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-t.C:
+			if _, err := os.Stat(dest.Path); err == nil {
+				slog.Info("destination path reappeared, resuming runner",
+					"destination_id", dest.ID, "path", dest.Path)
+				return nil
+			} else if !os.IsNotExist(err) {
+				return err
+			}
+		}
 	}
 }
 

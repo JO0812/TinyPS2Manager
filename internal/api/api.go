@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
@@ -184,13 +185,24 @@ type destinationJSON struct {
 	BDMPrefix  string `json:"bdmPrefix"`
 	FreeBytes  int64  `json:"freeBytes"`
 	TotalBytes int64  `json:"totalBytes"`
+	Reachable  bool   `json:"reachable"`
 	UpdatedAt  string `json:"updatedAt"`
+}
+
+// reachable reports whether the destination path exists right now. A
+// plain os.Stat (no Statfs, which can block on stale mounts): false
+// means unplugged or deleted, and the UI says so instead of showing
+// "-1 B free" with no explanation.
+func reachable(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func toDestinationJSON(d queue.Destination) destinationJSON {
 	return destinationJSON{
 		ID: d.ID, Path: d.Path, Kind: string(d.Kind), Filesystem: d.Filesystem,
 		FSOverride: d.FSOverride, BDMPrefix: d.BDMPrefix,
-		FreeBytes: d.FreeBytes, TotalBytes: d.TotalBytes, UpdatedAt: d.UpdatedAt,
+		FreeBytes: d.FreeBytes, TotalBytes: d.TotalBytes,
+		Reachable: reachable(d.Path), UpdatedAt: d.UpdatedAt,
 	}
 }

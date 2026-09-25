@@ -142,6 +142,7 @@
   $: prefixShown = pendingPrefix ?? dest?.bdmPrefix ?? '';
 
   function fsText(d: Destination): string {
+    if (d.freeBytes < 0) return `${d.filesystem.toUpperCase()} (size unknown)`;
     const base = `${d.filesystem.toUpperCase()} (${formatBytes(d.freeBytes)} free`;
     return d.totalBytes > 0 ? `${base} of ${formatBytes(d.totalBytes)})` : `${base})`;
   }
@@ -243,6 +244,9 @@
   <div class="card detail">
     {#if dest}
       <h2>Selected drive</h2>
+      {#if dest.reachable === false}
+        <p class="notice err">Path is missing — drive unplugged? Plug it back in; the queue resumes on its own.</p>
+      {/if}
       <dl>
         <div><dt>Path</dt><dd>{dest.path}</dd></div>
         <div><dt>Filesystem</dt><dd>{fsText(dest)}</dd></div>
@@ -298,10 +302,12 @@
         {/if}
       </div>
 
-      <button class="btn-primary big" onclick={() => (showPrepare = true)} disabled={items.length === 0 || preflight?.blocked}>
+      <button class="btn-primary big" onclick={() => (showPrepare = true)} disabled={items.length === 0 || preflight?.blocked || dest.reachable === false}>
         Prepare external drive
       </button>
-      {#if preflight?.blocked}
+      {#if dest.reachable === false}
+        <p class="muted small">Drive is unreachable — plug it back in first.</p>
+      {:else if preflight?.blocked}
         <p class="muted small">Fix pre-flight failures before preparing.</p>
       {:else if items.length === 0}
         <p class="muted small">Import games in the Library first.</p>

@@ -700,6 +700,100 @@ func TestExecutorRestartRecovery(t *testing.T) {
 	}
 }
 
+func TestRunDestinationParksOnMissingPath(t *testing.T) {
+	// Regression: an unplugged stick (destination path gone) used to make
+	// RunDestination fail instantly via SweepStaleTemps, looping the
+	// supervisor through its 30s error cooldown forever. Now it parks and
+	// waits for the path to reappear.
+	qs, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer qs.Close()
+	ls, err := library.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ls.Close()
+	missing := filepath.Join(t.TempDir(), "unplugged")
+	dest, err := qs.AddDestination(Destination{Path: missing, Kind: DestDrive})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex := New(qs, ls, newFakeDisk(0), "")
+	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	err = ex.RunDestination(ctx, dest.ID)
+	if err != context.DeadlineExceeded {
+		t.Fatalf("RunDestination = %v, want context deadline (parked, not crashed)", err)
+	}
+	if elapsed := time.Since(start); elapsed < 300*time.Millisecond {
+		t.Fatalf("returned after %v, want it to wait out the context (no instant crash)", elapsed)
+	}
+}
+
+func TestRunDestinationResumesOnReplug(t *testing.T) {
+	// End-to-end resume: destination missing at start, path appears
+	// mid-park, queued job then completes on the (re)mounted volume.
+	qs, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer qs.Close()
+	ls, err := library.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ls.Close()
+	missing := filepath.Join(t.TempDir(), "stick")
+	dest, err := qs.AddDestination(Destination{Path: missing, Kind: DestDrive})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srcDir := t.TempDir()
+	p := filepath.Join(srcDir, "g.iso")
+	content := writeRandom(t, p, 1<<20)
+	it, err := ls.UpsertItem(library.LibraryItem{
+		SourcePath: p, ContentHash: "replug", Platform: library.PlatformPS2,
+		Title: "G", SizeBytes: 1 << 20,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ls.UpdateDetection(it.ID, library.DiscDVD, library.MethodHeuristic); err != nil {
+		t.Fatal(err)
+	}
+	jobs, err := qs.Enqueue([]Job{
+		{LibraryItemID: it.ID, DestinationID: dest.ID, Kind: KindCopy, BytesTotal: 1 << 20},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex := New(qs, ls, transfer.FileDisk{}, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runErr := make(chan error, 1)
+	go func() { runErr <- ex.Run(ctx) }()
+	// Still parked: job stays pending while the path is missing.
+	time.Sleep(200 * time.Millisecond)
+	if j, _ := qs.GetJob(jobs[0].ID); j.Status != JobPending {
+		t.Fatalf("job = %q while path missing, want pending (parked)", j.Status)
+	}
+	// Replug: creating the mount dir lets the parked runner proceed.
+	if err := os.MkdirAll(missing, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h := &harness{qstore: qs, lib: ls, dest: dest}
+	waitJobStatus(t, h, jobs[0].ID, JobDone, 15*time.Second)
+	cancel()
+	<-runErr
+	back, err := os.ReadFile(filepath.Join(missing, "DVD", "g.iso"))
+	if err != nil || !bytes.Equal(back, content) {
+		t.Fatal("post-replug content mismatch")
+	}
+}
+
 func TestGroupedSerialLessNamesDistinct(t *testing.T) {
 	// Regression: two serial-less discs sharing a group title must not
 	// collapse to one VCD filename (silent overwrite). Each keeps its

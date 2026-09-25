@@ -60,6 +60,7 @@ export interface Destination {
   bdmPrefix: string;
   freeBytes: number;
   totalBytes: number;
+  reachable: boolean;
   updatedAt: string;
 }
 
