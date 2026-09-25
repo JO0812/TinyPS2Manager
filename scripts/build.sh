@@ -21,9 +21,14 @@ echo "building headless binary -> dist/oplbm"
 go build -o dist/oplbm ./cmd/oplbm
 
 # Desktop binary / bundle when possible (requires CGO + Wails).
+# webkit2_41 is mandatory, not optional: without it Wails compiles the
+# legacy assetserver variant whose request stubs drop HTTP methods and
+# bodies, so every POST/PATCH/PUT from the UI fails with "Load failed"
+# while GETs keep working (looks like a frozen app).
+WAILS_TAGS="desktop webkit2_41"
 if command -v wails >/dev/null 2>&1; then
   echo "wails found, building desktop bundle (build/bin/)..."
-  if wails build -tags desktop 2>&1; then
+  if wails build -tags "$WAILS_TAGS" 2>&1; then
     echo "wails build OK -> build/bin/"
   else
     echo "wails build failed, falling back to go build -tags desktop -> dist/oplbm-desktop" >&2

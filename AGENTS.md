@@ -3,7 +3,7 @@
 ## Build
 ```
 scripts/build-web.sh          # npm ci + vite build -> web/dist (rewrites web/dist/README.md placeholder)
-scripts/build.sh              # build-web.sh + gen-third-party.sh + go build dist/oplbm + wails build -tags desktop -> build/bin/ when Wails installed
+scripts/build.sh              # build-web.sh + gen-third-party.sh + go build dist/oplbm + wails build -tags "desktop webkit2_41" -> build/bin/ when Wails installed
 scripts/gen-third-party.sh    # regenerates THIRD_PARTY.md + licenses/ (licenses/ is gitignored, shipped in Wails bundles)
 GOOS=windows GOARCH=amd64 go build -o dist/oplbm.exe ./cmd/oplbm  # pure-Go cross-build, no -tags desktop
 ```
@@ -31,7 +31,7 @@ go install github.com/wailsapp/wails/v2/cmd/wails@latest
 # If only 4.1 headers exist, Wails still asks pkg-config for webkit2gtk-4.0:
 # shim it user-locally with: cp /usr/lib/x86_64-linux-gnu/pkgconfig/webkit2gtk-4.1.pc ~/.local/lib/pkgconfig/webkit2gtk-4.0.pc
 # and export PKG_CONFIG_PATH="$HOME/.local/lib/pkgconfig"
-wails build -tags desktop                          # -> build/bin/oplbm
+wails build -tags "desktop webkit2_41"            # -> build/bin/oplbm (webkit2_41 mandatory: without it POST/PATCH bodies are dropped -> "Load failed")
 ```
 
 ## Tests — how to run one

@@ -105,8 +105,11 @@ jobs:
         run: ./scripts/gen-third-party.sh
       - name: Wails build
         shell: bash
+        # webkit2_41 is mandatory: without it Wails compiles the legacy
+        # assetserver variant that drops HTTP methods/bodies, so every
+        # POST/PATCH/PUT from the UI fails with "Load failed" (looks frozen).
         run: |
-          wails build -tags desktop -skipbindings -o oplbm
+          wails build -tags "desktop webkit2_41" -skipbindings -o oplbm
           ls -R build/bin 2>/dev/null || ls -lh build/bin/ 2>/dev/null || true
       - name: Bundle archive
         shell: bash
