@@ -121,7 +121,7 @@ jobs:
             if command -v zip >/dev/null 2>&1; then
               (cd bundle/stage && zip -r "$GITHUB_WORKSPACE/dist/${{ matrix.bundle }}" .)
             else
-              powershell -Command "Compress-Archive -Path bundle/stage/* -DestinationPath \"$env:GITHUB_WORKSPACE/dist/${{ matrix.bundle }}\" -Force"
+              powershell -Command 'Compress-Archive -Path bundle/stage/* -DestinationPath "$env:GITHUB_WORKSPACE/dist/${{ matrix.bundle }}" -Force'
             fi
           else
             tar -czf "dist/${{ matrix.bundle }}" -C bundle/stage .
