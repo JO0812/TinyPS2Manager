@@ -462,8 +462,8 @@
     background: var(--danger-soft);
   }
   .check.warn {
-    border-color: #e6c200;
-    background: #fff9db;
+    border-color: var(--warning);
+    background: rgba(251, 191, 36, 0.1);
   }
   .badge {
     font-size: 10px;
@@ -483,7 +483,7 @@
     color: var(--danger);
   }
   .badge.warn {
-    background: #fff3cd;
-    color: #664d03;
+    background: rgba(251, 191, 36, 0.16);
+    color: var(--warning);
   }
 </style>

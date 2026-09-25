@@ -267,8 +267,8 @@
     color: var(--danger);
   }
   .pill-warn {
-    background: #fff3cd;
-    color: #664d03;
+    background: rgba(251, 191, 36, 0.16);
+    color: var(--warning);
   }
   .pill-green {
     background: var(--success-soft, #d1f0d1);
