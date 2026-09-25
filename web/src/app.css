@@ -1,8 +1,7 @@
 /* OPL Backup Manager theme: CSS custom properties, no framework.
-   Dark is the default (mockup); light overrides below. */
+   Dark-only; there is no light mode. */
 
-:root,
-[data-theme="dark"] {
+:root {
   --bg: #070b14;
   --bg-raised: #0a101c;
   --surface: #0e1626;
@@ -24,28 +23,6 @@
   --radius-sm: 8px;
   --shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
   color-scheme: dark;
-}
-
-[data-theme="light"] {
-  --bg: #eaf1f9;
-  --bg-raised: #ffffff;
-  --surface: #ffffff;
-  --surface-hover: #e6eef8;
-  --border: #d3e0f0;
-  --fg: #0d1b2e;
-  --fg-muted: #4a6079;
-  --fg-faint: #8499b3;
-  --accent: #0b6fd6;
-  --accent-hover: #1d82e8;
-  --accent-soft: rgba(11, 111, 214, 0.1);
-  --accent-border: #0b6fd6;
-  --success: #059669;
-  --success-soft: rgba(5, 150, 105, 0.1);
-  --danger: #dc2626;
-  --danger-soft: rgba(220, 38, 38, 0.08);
-  --warning: #b45309;
-  --shadow: 0 8px 24px rgba(23, 23, 31, 0.08);
-  color-scheme: light;
 }
 
 * {

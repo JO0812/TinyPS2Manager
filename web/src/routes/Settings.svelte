@@ -1,16 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api, type Settings } from '../lib/api';
-  import { applyTheme } from '../lib/theme';
 
   let settings: Settings | null = null;
   let notice = '';
   let noticeKind: 'ok' | 'err' = 'ok';
-  const themes: Array<[Settings['theme'], string]> = [
-    ['system', 'System'],
-    ['light', 'Light'],
-    ['dark', 'Dark'],
-  ];
 
   async function load() {
     try {
@@ -26,19 +20,11 @@
     notice = '';
     try {
       settings = await api.saveSettings(settings);
-      applyTheme(settings.theme);
       notice = 'Settings saved.';
       noticeKind = 'ok';
     } catch (e) {
       notice = e instanceof Error ? e.message : String(e);
       noticeKind = 'err';
-    }
-  }
-
-  function setTheme(t: Settings['theme']) {
-    if (settings) {
-      settings.theme = t;
-      applyTheme(t); // instant feedback; Save persists server-side
     }
   }
 
@@ -56,19 +42,6 @@
   <p class="muted">Loading…</p>
 {:else}
   <div class="card form">
-    <h2>Appearance</h2>
-    <div class="themes" role="group" aria-label="Theme">
-      {#each themes as [value, label]}
-        <button
-          class="btn-ghost"
-          class:active={settings.theme === value}
-          onclick={() => setTheme(value)}
-        >
-          {label}
-        </button>
-      {/each}
-    </div>
-
     <h2>Storage</h2>
     <label>
       Split threshold (bytes)
@@ -123,15 +96,6 @@
   }
   .form h2:first-child {
     margin-top: 0;
-  }
-  .themes {
-    display: flex;
-    gap: 8px;
-  }
-  .themes .btn-ghost.active {
-    border-color: var(--accent-border);
-    background: var(--accent-soft);
-    color: var(--fg);
   }
   label {
     display: flex;
