@@ -149,6 +149,9 @@
   }
 
   $: dest = destinations.find((d) => d.path === selectedPath);
+  // Unplugged (stored but missing) destinations sink to the bottom so live
+  // drives stay on top; the row itself carries the unplugged badge.
+  $: sorted = [...destinations].sort((a, b) => Number(a.reachable === false) - Number(b.reachable === false));
   $: itemIds = items.map((i) => i.id);
   // What the controls show: the in-flight choice wins over the last
   // server snapshot so edits never visibly revert mid-save.
@@ -214,10 +217,13 @@
     {#if destinations.length === 0}
       <p class="muted">None yet — add your USB stick or staging folder below.</p>
     {/if}
-    {#each destinations as d}
+    {#each sorted as d}
       <div class="drive-row">
-        <button class="drive" class:active={d.path === selectedPath} onclick={() => pick(d.path)}>
+        <button class="drive" class:active={d.path === selectedPath} class:unreachable={d.reachable === false} onclick={() => pick(d.path)}>
           <span class="drive-path">{d.path}</span>
+          {#if d.reachable === false}
+            <span class="pill pill-warn" title="Stored destination, currently unplugged — plug it back in to resume, or remove it with ✕">unplugged</span>
+          {/if}
           <span class="pill {(d.fsOverride || d.filesystem) === 'unknown' ? 'pill-gray' : 'pill-green'}" title={d.fsOverride ? 'explicit override' : 'detected'}>
             {(d.fsOverride || d.filesystem).toUpperCase()}{d.fsOverride ? '*' : ''}
           </span>
@@ -396,6 +402,10 @@
   .drive.active {
     border-color: var(--accent-border);
     background: var(--accent-soft);
+  }
+  .drive.unreachable {
+    opacity: 0.65;
+    border-style: dashed;
   }
   .drive-path {
     font-weight: 600;
