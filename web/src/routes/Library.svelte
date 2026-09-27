@@ -8,7 +8,7 @@
 
   let items: LibraryItem[] = [];
   let destinations: Destination[] = [];
-  let selectedId = 0;
+  let selectedPath = '';
   let query = '';
   let platform: 'all' | 'ps2' | 'ps1' = 'all';
   let sort: 'name' | 'largest' | 'smallest' = 'name';
@@ -24,9 +24,9 @@
       const [libs, dests] = await Promise.all([api.library(), api.destinations()]);
       items = libs;
       destinations = dests;
-      if (!dests.some((d) => d.id === selectedId)) {
-        selectedId = dests[0]?.id ?? 0;
-        localStorage.setItem('oplbm.destId', String(selectedId));
+      if (!dests.some((d) => d.path === selectedPath)) {
+        selectedPath = dests[0]?.path ?? '';
+        localStorage.setItem('oplbm.destPath', selectedPath);
       }
     } catch (e) {
       notice = e instanceof Error ? e.message : String(e);
@@ -36,9 +36,9 @@
     }
   }
 
-  function pickDestination(id: number) {
-    selectedId = id;
-    localStorage.setItem('oplbm.destId', String(id));
+  function pickDestination(path: string) {
+    selectedPath = path;
+    localStorage.setItem('oplbm.destPath', path);
   }
 
   async function doImport() {
@@ -86,7 +86,7 @@
       });
   })();
   $: fsBadge = (() => {
-    const d = destinations.find((x) => x.id === selectedId);
+    const d = destinations.find((x) => x.path === selectedPath);
     return d ? (d.fsOverride || d.filesystem).toUpperCase() : '';
   })();
   $: fsKnown = fsBadge !== '' && fsBadge !== 'UNKNOWN';
@@ -100,7 +100,7 @@
   }
 
   onMount(() => {
-    selectedId = Number(localStorage.getItem('oplbm.destId') || '0');
+    selectedPath = localStorage.getItem('oplbm.destPath') || '';
     refresh();
     window.addEventListener('keydown', hotkeys);
     return () => window.removeEventListener('keydown', hotkeys);
@@ -145,7 +145,7 @@
   </div>
 </div>
 
-<DestinationPanel {destinations} {selectedId} gameCount={items.length} onSelect={pickDestination} />
+<DestinationPanel {destinations} {selectedPath} gameCount={items.length} onSelect={pickDestination} />
 
 {#if notice}
   <p class="notice" class:err={noticeKind === 'err'}>{notice}</p>

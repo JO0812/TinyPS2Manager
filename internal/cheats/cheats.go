@@ -43,6 +43,57 @@ var (
 	nameRe    = regexp.MustCompile(`^[0-9A-Fa-f]{16}$`) // without space, also treat as code if 16 hex
 )
 
+// serialRegion maps a GameID serial prefix to its build region (spec §2.9:
+// wrong-region codes usually don't fire, occasionally they crash).
+func serialRegion(gameID string) string {
+	if len(gameID) < 4 {
+		return ""
+	}
+	switch strings.ToUpper(gameID[:4]) {
+	case "SLUS", "SCUS":
+		return "US"
+	case "SLES", "SCES", "SLED", "SCED":
+		return "EU"
+	case "SLPS", "SLPM", "SCPS", "SLKA":
+		return "JP"
+	}
+	return ""
+}
+
+// titleRegionRe matches parenthesized/bracketed region tokens in library
+// titles, e.g. "Game (USA)", "Game (Europe)", "Game (J)".
+var titleRegionRe = regexp.MustCompile(`[\(\[](U|USA|NTSC-?U|E|EUROPE|PAL|J|JAPAN|NTSC-?J)[\)\]]`)
+
+// titleRegion extracts a region tag from the title, or "" when untagged.
+func titleRegion(title string) string {
+	m := titleRegionRe.FindStringSubmatch(strings.ToUpper(title))
+	if m == nil {
+		return ""
+	}
+	switch m[1] {
+	case "U", "USA", "NTSC-U", "NTSCU":
+		return "US"
+	case "E", "EUROPE", "PAL":
+		return "EU"
+	case "J", "JAPAN", "NTSC-J", "NTSCJ":
+		return "JP"
+	}
+	return ""
+}
+
+// RegionMatches reports whether the CheatDatabase title's build region agrees
+// with the disc's region (from the GameID serial). Untagged titles and
+// unknown serials carry no evidence of mismatch, so they match. Callers
+// record regionMatched=false files to default the on-console cheat mode to
+// Select instead of Auto (spec §2.9).
+func RegionMatches(gameID, title string) bool {
+	sr, tr := serialRegion(gameID), titleRegion(title)
+	if sr == "" || tr == "" {
+		return true
+	}
+	return sr == tr
+}
+
 // ParseDatabase parses CheatDevice CheatDatabase.txt (title-keyed sections).
 // It returns map from game title as it appears in the file to its cheats.
 // The caller maps via library Title/GameID and records regionMatched.
@@ -291,6 +342,52 @@ func ValidateCHT(content string) (Warnings, error) {
 // It validates before writing, respects gameIdUncertain gating, and
 // never overwrites a hand file (highest trust). The caller picks the
 // winner (gameplay OR widescreen OR hand) and calls Stage once.
+// ValidateHand checks an already-authored .cht body (hand files are staged
+// whole, never rebuilt): exactly one 9-type master line must be present,
+// engine-skipped 8/A/B lines are flagged, and >250 named cheats are reported
+// via DroppedCount as an advisory (hand files keep highest trust and are
+// staged whole regardless).
+func ValidateHand(content string) (Warnings, error) {
+	masters, names, skipped := 0, 0, false
+	for _, line := range strings.Split(content, "\n") {
+		t := strings.TrimSpace(line)
+		if t == "" || strings.HasPrefix(t, "//") || strings.HasPrefix(t, "#") {
+			continue
+		}
+		fields := strings.Fields(t)
+		if len(fields) == 2 && hexCodeRe.MatchString(t) {
+			switch strings.ToUpper(string(fields[0][0])) {
+			case "9":
+				masters++
+			case "8", "A", "B":
+				skipped = true
+			}
+			continue
+		}
+		if len(fields) == 1 && nameRe.MatchString(fields[0]) {
+			switch strings.ToUpper(string(fields[0][0])) {
+			case "9":
+				masters++
+			case "8", "A", "B":
+				skipped = true
+			}
+			continue
+		}
+		names++
+	}
+	warns := Warnings{HasEngineSkipped: skipped}
+	if masters != 1 {
+		if masters > 1 {
+			warns.HasMultipleMasters = true
+		}
+		return warns, fmt.Errorf("no master code: need exactly one 9-type line, got %d", masters)
+	}
+	if names > MaxCheatsPerFile {
+		warns.DroppedCount = names - MaxCheatsPerFile
+	}
+	return warns, nil
+}
+
 func Stage(ctx context.Context, disk transfer.Disk, root, prefix string, item library.LibraryItem, content string, confirmed bool) error {
 	if item.GameID == "" {
 		return fmt.Errorf("item %d has no GameID: cannot stage cheats", item.ID)

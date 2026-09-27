@@ -21,8 +21,14 @@ func (s *Server) handleQueueEnqueue(w http.ResponseWriter, r *http.Request) {
 	var kind queue.JobKind
 	if body.Kind != nil {
 		kind = queue.JobKind(*body.Kind)
+		// Enrich runs synchronously via POST /api/enrich/{art,cheats,riptopl}
+		// under the destination write gate — it is not a queue job kind.
+		if kind == queue.KindEnrich {
+			writeErr(w, http.StatusUnprocessableEntity, "kind", "enrich is not enqueueable: use POST /api/enrich/{art,cheats,riptopl}")
+			return
+		}
 		switch kind {
-		case queue.KindCopy, queue.KindConvertCopy, queue.KindSplitAndCopy, queue.KindEmberCopy, queue.KindEnrich, "":
+		case queue.KindCopy, queue.KindConvertCopy, queue.KindSplitAndCopy, queue.KindEmberCopy, "":
 		default:
 			writeErr(w, http.StatusBadRequest, "kind", "unknown job kind")
 			return

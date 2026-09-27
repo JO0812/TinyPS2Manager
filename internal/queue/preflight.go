@@ -41,6 +41,7 @@ type Result struct {
 // Blocking (fail-closed):
 // - partition table is dos (MBR) — GPT is unsupported; folder destinations skip with warn
 // - partition type vs fs toggle (when detectable)
+// - partition start is 1 MiB-aligned (drives only)
 // - filesystem matches toggle (via fsinfo)
 // - ul.cfg+ul.* sets parse (corrupt → fail)
 // - free-space probe (≥1 MiB contiguous)
@@ -60,7 +61,7 @@ func Preflight(dest *Destination) (*Result, error) {
 	markBlocked := func() { blocked = true }
 
 	// 1. Filesystem matches toggle
-	fstype, freeBytes, _, err := fsinfo.Probe(dest.Path)
+	fstype, freeBytes, totalBytes, err := fsinfo.Probe(dest.Path)
 	if err != nil {
 		add("filesystem", CheckWarn, fmt.Sprintf("filesystem probe failed: %v (set explicit FAT32/exFAT toggle)", err))
 	} else {
@@ -148,6 +149,36 @@ func Preflight(dest *Destination) (*Result, error) {
 		}
 	} else {
 		add("partition-type", CheckWarn, "folder destination: partition type check skipped (only for drives)")
+	}
+
+	// 6. Partition start alignment (spec §2.11): the partition must start
+	// 1 MiB-aligned (sector 2048); legacy offsets mount nowhere.
+	if dest.Kind == DestFolder {
+		add("partition-alignment", CheckWarn, "folder destination: alignment check skipped (only for drives)")
+	} else if off, ok, msg := probePartitionOffset(dest.Path); !ok {
+		add("partition-alignment", CheckWarn, msg)
+	} else if off%(1<<20) == 0 {
+		add("partition-alignment", CheckPass, fmt.Sprintf("partition starts at byte %d (1 MiB-aligned)", off))
+	} else {
+		add("partition-alignment", CheckFail, fmt.Sprintf("partition starts at byte %d (sector %d), not 1 MiB-aligned — repartition starting at sector 2048 or later", off, off/512))
+		markBlocked()
+	}
+
+	// 7. exFAT allocation unit heuristic (spec §2.11: default AUS required).
+	// Warn-only: the measured unit is a statfs-level heuristic.
+	if strings.ToLower(dest.EffectiveFilesystem()) == "exfat" && dest.Kind == DestDrive {
+		want := defaultExFATCluster(totalBytes)
+		got, cerr := fsinfo.ClusterSize(dest.Path)
+		switch {
+		case want <= 0 || totalBytes <= 0:
+			add("cluster-size", CheckWarn, "exFAT cluster check skipped: volume size unknowable")
+		case cerr != nil:
+			add("cluster-size", CheckWarn, fmt.Sprintf("exFAT cluster size unknowable: %v", cerr))
+		case got != want:
+			add("cluster-size", CheckWarn, fmt.Sprintf("exFAT allocation unit is %d bytes, default for this size is %d — reformat with defaults", got, want))
+		default:
+			add("cluster-size", CheckPass, fmt.Sprintf("exFAT allocation unit %d bytes (default)", got))
+		}
 	}
 
 	// Warnings: non-flash hints, fragmentation risk
@@ -363,6 +394,70 @@ func probePartitionTable(path string, kind DestinationKind) (string, string, err
 		}
 	}
 	return "dos", "MBR partition table detected", nil
+}
+
+// probePartitionOffset returns the partition's byte offset from the start
+// of the drive (spec §2.11 alignment). UDisks2 first (no root), then the
+// MBR partition entry (needs block-read privileges). ok=false with a
+// human reason when neither works.
+func probePartitionOffset(path string) (uint64, bool, string) {
+	dev, _, err := deviceForPath(path)
+	if err != nil {
+		return 0, false, fmt.Sprintf("alignment check skipped: %v", err)
+	}
+	if info, uerr := fsinfo.UdisksLookup(dev); uerr == nil && info.HasOffset {
+		return info.PartOffset, true, ""
+	}
+	diskDev := diskForPartition(dev)
+	partNum := partitionNumber(dev)
+	if partNum <= 0 || partNum > 4 {
+		return 0, false, fmt.Sprintf("alignment check skipped: cannot determine partition number for %s", dev)
+	}
+	diskPath := filepath.Join("/dev", diskDev)
+	f, err := os.Open(diskPath)
+	if err != nil {
+		return 0, false, fmt.Sprintf("alignment check skipped: cannot open %s (%v)", diskPath, err)
+	}
+	defer f.Close()
+	off, err := mbrPartitionOffset(f, partNum)
+	if err != nil {
+		return 0, false, fmt.Sprintf("alignment check skipped: %v", err)
+	}
+	return off, true, ""
+}
+
+// mbrPartitionOffset parses the MBR partition entry for a 1-based primary
+// partition number and returns its byte offset (start LBA × 512).
+func mbrPartitionOffset(f *os.File, partNum int) (uint64, error) {
+	mbr := make([]byte, 512)
+	if _, err := io.ReadFull(f, mbr); err != nil {
+		return 0, fmt.Errorf("cannot read MBR (%v)", err)
+	}
+	if mbr[510] != 0x55 || mbr[511] != 0xAA {
+		return 0, fmt.Errorf("no MBR signature")
+	}
+	entry := mbr[446+(partNum-1)*16:]
+	if entry[4] == 0x00 {
+		return 0, fmt.Errorf("partition %d type 0x00 (unused)", partNum)
+	}
+	lba := uint64(entry[8]) | uint64(entry[9])<<8 | uint64(entry[10])<<16 | uint64(entry[11])<<24
+	return lba * 512, nil
+}
+
+// defaultExFATCluster is the Microsoft default allocation unit for an
+// exFAT volume of totalBytes: 4 KiB up to 256 MiB, 32 KiB up to 32 GiB,
+// 128 KiB above. ≤0 when the size is unknowable.
+func defaultExFATCluster(totalBytes int64) int64 {
+	switch {
+	case totalBytes <= 0:
+		return -1
+	case totalBytes <= 256<<20:
+		return 4 << 10
+	case totalBytes <= 32<<30:
+		return 32 << 10
+	default:
+		return 128 << 10
+	}
 }
 
 func probePartitionType(path string) (string, string, error) {

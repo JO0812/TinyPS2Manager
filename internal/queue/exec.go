@@ -388,6 +388,12 @@ func (e *Executor) executeJob(ctx context.Context, dest *Destination, job *Job, 
 		cancel()
 	}()
 
+	// Exclusive write gate for the whole write+verify phase (spec §2.6):
+	// enrich staging from the API takes the same gate, so small-file
+	// writes always land between game jobs, never interleaved.
+	unlock := LockDestination(dest.Path)
+	defer unlock()
+
 	tr := &tracker{store: e.store, id: job.ID, total: w.total()}
 	var runErr error
 	switch job.Kind {

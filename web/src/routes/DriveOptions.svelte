@@ -5,7 +5,7 @@
 
   let destinations: Destination[] = [];
   let volumes: Volume[] = [];
-  let selectedId = 0;
+  let selectedPath = '';
   let items: LibraryItem[] = [];
   let showPrepare = false;
   let notice = '';
@@ -24,9 +24,9 @@
       destinations = dests;
       items = libs;
       volumes = vols;
-      if (!dests.some((d) => d.id === selectedId)) {
-        selectedId = dests[0]?.id ?? 0;
-        localStorage.setItem('oplbm.destId', String(selectedId));
+      if (!dests.some((d) => d.path === selectedPath)) {
+        selectedPath = dests[0]?.path ?? '';
+        localStorage.setItem('oplbm.destPath', selectedPath);
       }
     } catch (e) {
       notice = e instanceof Error ? e.message : String(e);
@@ -34,16 +34,16 @@
     }
   }
 
-  function pick(id: number) {
-    selectedId = id;
-    localStorage.setItem('oplbm.destId', String(id));
+  function pick(path: string) {
+    selectedPath = path;
+    localStorage.setItem('oplbm.destPath', path);
   }
 
   async function removeDrive(d: Destination) {
     if (!confirm(`Remove destination ${d.path}?\nDestinations with queued jobs cannot be removed.`)) return;
     notice = '';
     try {
-      await api.deleteDestination(d.id);
+      await api.deleteDestination(d.path);
       notice = 'Destination removed.';
       noticeKind = 'ok';
       await refresh();
@@ -67,7 +67,7 @@
       newPrefix = '';
       pickedVolume = '';
       await refresh();
-      pick(d.id);
+      pick(d.path);
       notice = 'Destination added.';
       noticeKind = 'ok';
     } catch (e) {
@@ -83,7 +83,7 @@
     if (!path) return;
     const existing = destinations.find((d) => d.path === path);
     if (existing) {
-      pick(existing.id);
+      pick(existing.path);
       notice = 'Already in the list — selected.';
       noticeKind = 'ok';
       return;
@@ -106,15 +106,15 @@
   let fsSeq = 0;
   let prefixSeq = 0;
 
-  async function savePrefix(id: number, prefix: string) {
+  async function savePrefix(path: string, prefix: string) {
     const mine = ++prefixSeq;
     pendingPrefix = prefix;
     prefixBusy = true;
     notice = '';
     try {
-      await api.patchDestination(id, { bdmPrefix: prefix });
+      await api.patchDestination(path, { bdmPrefix: prefix });
       await refresh();
-      await loadPreflight(id);
+      await loadPreflight(path);
     } catch (e) {
       if (mine !== prefixSeq) return;
       notice = e instanceof Error ? e.message : String(e);
@@ -127,15 +127,15 @@
     }
   }
 
-  async function saveFs(id: number, ov: string) {
+  async function saveFs(path: string, ov: string) {
     const mine = ++fsSeq;
     pendingFs = ov;
     fsBusy = true;
     notice = '';
     try {
-      await api.patchDestination(id, { filesystemOverride: ov });
+      await api.patchDestination(path, { filesystemOverride: ov });
       await refresh();
-      await loadPreflight(id);
+      await loadPreflight(path);
     } catch (e) {
       if (mine !== fsSeq) return;
       notice = e instanceof Error ? e.message : String(e);
@@ -148,7 +148,7 @@
     }
   }
 
-  $: dest = destinations.find((d) => d.id === selectedId);
+  $: dest = destinations.find((d) => d.path === selectedPath);
   $: itemIds = items.map((i) => i.id);
   // What the controls show: the in-flight choice wins over the last
   // server snapshot so edits never visibly revert mid-save.
@@ -170,12 +170,12 @@
   // state after rapid dropdown changes.
   let preflightSeq = 0;
 
-  async function loadPreflight(id: number) {
+  async function loadPreflight(path: string) {
     const seq = ++preflightSeq;
     preflightBusy = true;
     preflightError = '';
     try {
-      const res = await api.preflight(id);
+      const res = await api.preflight(path);
       if (seq !== preflightSeq) return; // stale: a newer load is in flight
       preflight = res;
     } catch (e) {
@@ -190,12 +190,12 @@
   // Auto-load only when the SELECTION changes. destinations is replaced on
   // every refresh (new object identities), so keying off `dest` refired a
   // preflight fetch after every save — piling requests on slow devices.
-  $: if (selectedId) {
-    void loadPreflight(selectedId);
+  $: if (selectedPath) {
+    void loadPreflight(selectedPath);
   }
 
   onMount(() => {
-    selectedId = Number(localStorage.getItem('oplbm.destId') || '0');
+    selectedPath = localStorage.getItem('oplbm.destPath') || '';
     refresh();
   });
 </script>
@@ -216,7 +216,7 @@
     {/if}
     {#each destinations as d}
       <div class="drive-row">
-        <button class="drive" class:active={d.id === selectedId} onclick={() => pick(d.id)}>
+        <button class="drive" class:active={d.path === selectedPath} onclick={() => pick(d.path)}>
           <span class="drive-path">{d.path}</span>
           <span class="pill {(d.fsOverride || d.filesystem) === 'unknown' ? 'pill-gray' : 'pill-green'}" title={d.fsOverride ? 'explicit override' : 'detected'}>
             {(d.fsOverride || d.filesystem).toUpperCase()}{d.fsOverride ? '*' : ''}
@@ -274,7 +274,7 @@
         <select
           value={fsShown}
           aria-busy={fsBusy}
-          onchange={(e) => saveFs(dest.id, e.currentTarget.value)}
+          onchange={(e) => saveFs(dest.path, e.currentTarget.value)}
         >
           <option value="">Auto-detect</option>
           <option value="fat32">FAT32 (safe default)</option>
@@ -288,7 +288,7 @@
           class="field"
           value={prefixShown}
           aria-busy={prefixBusy}
-          onchange={(e) => savePrefix(dest.id, e.currentTarget.value)}
+          onchange={(e) => savePrefix(dest.path, e.currentTarget.value)}
           placeholder="(drive root)"
         />
         {#if prefixBusy}<span class="muted small">Saving…</span>{/if}
@@ -296,7 +296,7 @@
 
       <div class="preflight">
         <h3>Pre-flight checks</h3>
-        <button class="btn-ghost small" onclick={() => loadPreflight(selectedId)} disabled={preflightBusy || !selectedId}>
+        <button class="btn-ghost small" onclick={() => loadPreflight(selectedPath)} disabled={preflightBusy || !selectedPath}>
           {preflightBusy ? 'Checking…' : 'Re-check'}
         </button>
         {#if preflightError}

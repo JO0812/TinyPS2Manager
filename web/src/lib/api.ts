@@ -38,7 +38,7 @@ export interface PreflightResult {
 export interface Job {
   id: number;
   libraryItemId: number;
-  destinationId: number;
+  destinationPath: string;
   kind: string;
   order: number;
   status: 'pending' | 'running' | 'paused' | 'error' | 'done';
@@ -52,7 +52,6 @@ export interface Job {
 }
 
 export interface Destination {
-  id: number;
   path: string;
   kind: string;
   filesystem: string;
@@ -80,6 +79,9 @@ export interface Settings {
   splitThreshold: number;
   bdmPrefixDefault: string;
   filesystemDefault: string;
+  cheatDatabasePath: string;
+  widescreenDir: string;
+  handCheatDir: string;
 }
 
 export interface ProgressEvent {
@@ -174,30 +176,33 @@ export const api = {
   importDir: (path: string) => post<LibraryItem[]>('/api/library/import', { path }),
   patchLibrary: (id: number, body: { discType?: string; title?: string; discGroupId?: number | null }) =>
     patch<LibraryItem>(`/api/library/${id}`, body),
-  enrichment: (id: number) => get<Enrichment>(`/api/library/${id}/enrichment`),
+  enrichment: (id: number, destinationPath?: string) =>
+    get<Enrichment>(
+      `/api/library/${id}/enrichment${destinationPath ? `?destinationPath=${encodeURIComponent(destinationPath)}` : ''}`,
+    ),
 
   destinations: () => get<Destination[]>('/api/destinations'),
   volumes: () => get<Volume[]>('/api/destinations/volumes'),
   createDestination: (body: { path: string; kind?: string; filesystemOverride?: string; bdmPrefix?: string }) =>
     post<Destination>('/api/destinations', body),
-  patchDestination: (id: number, body: { bdmPrefix?: string; filesystemOverride?: string }) =>
-    patch<Destination>(`/api/destinations/${id}`, body),
-  deleteDestination: (id: number) =>
-    req<{ deleted: boolean }>('DELETE', `/api/destinations/${id}`),
-  preflight: (id: number) => get<PreflightResult>(`/api/destinations/${id}/preflight`),
+  patchDestination: (path: string, body: { bdmPrefix?: string; filesystemOverride?: string }) =>
+    patch<Destination>('/api/destinations', { path, ...body }),
+  deleteDestination: (path: string) =>
+    req<{ deleted: boolean }>('DELETE', '/api/destinations', { path }),
+  preflight: (path: string) => get<PreflightResult>(`/api/destinations/preflight?path=${encodeURIComponent(path)}`),
 
   queue: () => get<Job[]>('/api/queue'),
-  enqueue: (destinationId: number, itemIds: number[], kind?: string) =>
-    post<Job[]>('/api/queue', { destinationId, itemIds, kind }),
+  enqueue: (destinationPath: string, itemIds: number[], kind?: string) =>
+    post<Job[]>('/api/queue', { destinationPath, itemIds, kind }),
   jobAction: (id: number, body: { action?: string; order?: number }) =>
     patch<Job | { deleted: boolean }>(`/api/queue/${id}`, body),
   pauseAll: () => post<{ paused: boolean }>('/api/queue/pause'),
   resumeAll: () => post<{ paused: boolean }>('/api/queue/resume'),
 
-  prepare: (destId: number, body: PrepareRequest) =>
-    post<PreparePreview | PrepareResult>(`/api/destinations/${destId}/prepare`, body),
+  prepare: (destinationPath: string, body: PrepareRequest) =>
+    post<PreparePreview | PrepareResult>('/api/destinations/prepare', { destinationPath, ...body }),
 
-  enrich: (kind: 'art' | 'cheats' | 'riptopl', body: { destinationId: number; itemIds?: number[]; tag?: string; confirmUncertain?: boolean; missingOnly?: boolean }) =>
+  enrich: (kind: 'art' | 'cheats' | 'riptopl', body: { destinationPath: string; itemIds?: number[]; tag?: string; confirmUncertain?: boolean; missingOnly?: boolean; cheatSource?: string }) =>
     post<{ results: unknown[] } | { tag: string; asset: string; url: string; digest: string; flavour: string; elfPath: string }>(`/api/enrich/${kind}`, body),
 
   settings: () => get<Settings>('/api/settings'),

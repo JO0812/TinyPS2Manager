@@ -864,7 +864,9 @@ func mustGetItem(t *testing.T, h *harness, id int64) *library.LibraryItem {
 func TestEstimate(t *testing.T) {
 	h := newHarness(t, ":memory:")
 	fat := h.dest
-	fat.Filesystem = "fat32"
+	// The harness registers an exfat FSOverride; EffectiveFilesystem prefers
+	// the override, so set it (not Filesystem) for the FAT32 case.
+	fat.FSOverride = "fat32"
 	srcDir := t.TempDir()
 
 	small := filepath.Join(srcDir, "cd.iso")
@@ -900,7 +902,7 @@ func TestEstimate(t *testing.T) {
 	}
 	// Same image on exFAT stays a plain copy.
 	exfat := fat
-	exfat.Filesystem = "exfat"
+	exfat.FSOverride = "exfat"
 	if kind, _, err := Estimate(&dvdItem, &exfat, h.lib); err != nil || kind != KindCopy {
 		t.Errorf("exfat = %q,%v", kind, err)
 	}

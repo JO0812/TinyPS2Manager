@@ -103,10 +103,10 @@ async function clickText(page, scope, text) {
   const hbB = await page.evaluate(() => window.__hb);
   check('drive-dropdown-responsive', hbB > hbA, `hb ${hbA}->${hbB}`);
   const ov = await page.evaluate(() => {
-    const id = Number(localStorage.getItem('oplbm.destId') || '0');
+    const path = localStorage.getItem('oplbm.destPath') || '';
     return fetch('/api/destinations')
       .then((r) => r.json())
-      .then((d) => (d.find((x) => x.id === id) || {}).fsOverride);
+      .then((d) => (d.find((x) => x.path === path) || {}).fsOverride);
   });
   check('drive-dropdown-persisted', ov === 'fat32', `fsOverride=${ov}`);
 
@@ -117,12 +117,12 @@ async function clickText(page, scope, text) {
   await new Promise((r) => setTimeout(r, 800));
   await page.evaluate(async () => {
     const dests = await (await fetch('/api/destinations')).json();
-    await fetch(`/api/destinations/${dests[0].id}`, {
+    await fetch('/api/destinations', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filesystemOverride: 'exfat' }),
+      body: JSON.stringify({ path: dests[0].path, filesystemOverride: 'exfat' }),
     });
-    localStorage.setItem('oplbm.destId', String(dests[0].id));
+    localStorage.setItem('oplbm.destPath', dests[0].path);
   });
   await page.evaluate(() => {
     document.querySelector('.game-card .dots').click();

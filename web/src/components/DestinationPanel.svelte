@@ -2,11 +2,11 @@
   import { formatBytes, type Destination } from '../lib/api';
 
   export let destinations: Destination[];
-  export let selectedId: number;
+  export let selectedPath: string;
   export let gameCount: number;
-  export let onSelect: (id: number) => void;
+  export let onSelect: (path: string) => void;
 
-  $: dest = destinations.find((d) => d.id === selectedId);
+  $: dest = destinations.find((d) => d.path === selectedPath);
   $: fsLabel = dest ? (dest.fsOverride || dest.filesystem).toUpperCase() : '';
   $: fsKnown = fsLabel !== '' && fsLabel !== 'UNKNOWN';
   $: hasCapacity = !!dest && dest.totalBytes > 0;
@@ -30,12 +30,12 @@
     {#if destinations.length > 1}
       <select
         class="field dest-select"
-        value={selectedId}
-        on:change={(e) => onSelect(Number(e.currentTarget.value))}
+        value={selectedPath}
+        on:change={(e) => onSelect(e.currentTarget.value)}
         aria-label="Destination"
       >
         {#each destinations as d}
-          <option value={d.id}>{d.path}</option>
+          <option value={d.path}>{d.path}</option>
         {/each}
       </select>
     {/if}

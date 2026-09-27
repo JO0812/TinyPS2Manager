@@ -33,17 +33,20 @@
     return 200 + (h % 30);
   }
 
+  function destPath(): string | null {
+    const p = localStorage.getItem('oplbm.destPath') || '';
+    if (!p) error = 'Pick a destination first (header panel).';
+    return p || null;
+  }
+
   async function enqueue() {
     menuOpen = false;
-    const destId = Number(localStorage.getItem('oplbm.destId') || '0');
-    if (!destId) {
-      error = 'Pick a destination first (header panel).';
-      return;
-    }
+    const dp = destPath();
+    if (!dp) return;
     busy = 'queue';
     error = '';
     try {
-      await api.enqueue(destId, enqueueIds);
+      await api.enqueue(dp, enqueueIds);
       onChanged();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -54,15 +57,53 @@
 
   async function enqueueEmber() {
     menuOpen = false;
-    const destId = Number(localStorage.getItem('oplbm.destId') || '0');
-    if (!destId) {
-      error = 'Pick a destination first.';
-      return;
-    }
+    const dp = destPath();
+    if (!dp) return;
     busy = 'queue';
     error = '';
     try {
-      await api.enqueue(destId, enqueueIds, 'copy-ps1-ember');
+      await api.enqueue(dp, enqueueIds, 'copy-ps1-ember');
+      onChanged();
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    } finally {
+      busy = '';
+    }
+  }
+
+  async function fetchArt() {
+    menuOpen = false;
+    const dp = destPath();
+    if (!dp) return;
+    busy = 'art';
+    error = '';
+    try {
+      await api.enrich('art', { destinationPath: dp, itemIds: [item.id] });
+      await loadEnrich();
+      onChanged();
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    } finally {
+      busy = '';
+    }
+  }
+
+  let cheatSource = 'auto';
+
+  async function stageCheats() {
+    menuOpen = false;
+    const dp = destPath();
+    if (!dp) return;
+    busy = 'cheats';
+    error = '';
+    try {
+      await api.enrich('cheats', {
+        destinationPath: dp,
+        itemIds: [item.id],
+        confirmUncertain: item.gameIdUncertain,
+        cheatSource,
+      });
+      await loadEnrich();
       onChanged();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -124,7 +165,7 @@
 
   async function loadEnrich() {
     try {
-      enrich = await api.enrichment(item.id);
+      enrich = await api.enrichment(item.id, localStorage.getItem('oplbm.destPath') || undefined);
     } catch {
       // silent: enrichment is best-effort
     }
@@ -173,7 +214,7 @@
         {/if}
         {#if enrich}
           <span class="pill {artBadgeClass(enrich.artStatus)}" title={enrich.artKey}>ART:{enrich.artStatus}</span>
-          <span class="pill {enrich.cheatStatus === 'available' ? 'pill-green' : enrich.cheatStatus === 'needs_confirm' ? 'pill-warn' : 'pill-gray'}" title="Cheats">
+          <span class="pill {enrich.cheatStatus === 'available' || enrich.cheatStatus === 'staged' ? 'pill-green' : enrich.cheatStatus === 'needs_confirm' ? 'pill-warn' : 'pill-gray'}" title="Cheats">
             CHT:{enrich.cheatStatus}
           </span>
           {#if !enrich.regionMatched}
@@ -195,6 +236,19 @@
           {/if}
           {#if item.platform === 'ps1'}
             <button onclick={enqueueEmber} disabled={busy !== ''} title="Copy CUE+BINs to EMBER/games without VCD conversion (beta, needs BIOS)">Add as Ember (no convert)</button>
+          {/if}
+          <button onclick={fetchArt} disabled={busy !== ''} title="Download cover art for this title onto the selected destination">Fetch art</button>
+          {#if item.platform === 'ps2' && item.gameId}
+            <label class="menu-row" title="Cheat source: hand files win automatically; widescreen pack, then cheat DB">
+              Cheats from
+              <select bind:value={cheatSource} disabled={busy !== ''} aria-label="Cheat source">
+                <option value="auto">Auto (hand › wide › DB)</option>
+                <option value="hand">Hand file</option>
+                <option value="widescreen">Widescreen pack</option>
+                <option value="database">Cheat DB</option>
+              </select>
+            </label>
+            <button onclick={stageCheats} disabled={busy !== ''} title="Stage PS2RD cheats for this title">Stage cheats</button>
           {/if}
           <button onclick={startRename}>Rename…</button>
         </div>
@@ -320,6 +374,23 @@
   .menu button:disabled {
     opacity: 0.5;
     cursor: default;
+  }
+  .menu-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 10px;
+    font-size: 12px;
+    color: var(--fg-muted);
+  }
+  .menu-row select {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 6px;
+    color: var(--fg);
+    font-size: 12px;
   }
   .rename {
     padding: 6px 8px;

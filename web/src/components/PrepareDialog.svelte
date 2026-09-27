@@ -17,7 +17,7 @@
     error = '';
     result = null;
     try {
-      const res = await api.prepare(dest.id, {
+      const res = await api.prepare(dest.path, {
         mode: 'preview',
         itemIds,
         riptoplTag: withLoader ? tag : undefined,
@@ -35,7 +35,7 @@
     busy = 'execute';
     error = '';
     try {
-      const res = (await api.prepare(dest.id, {
+      const res = (await api.prepare(dest.path, {
         mode: 'execute',
         itemIds,
         riptoplTag: preview?.riptopl ? tag : undefined,

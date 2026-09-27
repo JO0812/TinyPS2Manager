@@ -162,3 +162,52 @@ func TestPreflightFragmentation(t *testing.T) {
 	}
 	_ = found
 }
+
+func TestDefaultExFATCluster(t *testing.T) {
+	cases := []struct {
+		total int64
+		want  int64
+	}{
+		{-1, -1},
+		{0, -1},
+		{100 << 20, 4 << 10},
+		{256 << 20, 4 << 10},
+		{1 << 30, 32 << 10},
+		{32 << 30, 32 << 10},
+		{64 << 30, 128 << 10},
+	}
+	for _, c := range cases {
+		if got := defaultExFATCluster(c.total); got != c.want {
+			t.Errorf("defaultExFATCluster(%d) = %d, want %d", c.total, got, c.want)
+		}
+	}
+}
+
+func TestMBRPartitionOffset(t *testing.T) {
+	mbr := make([]byte, 512)
+	mbr[510], mbr[511] = 0x55, 0xAA
+	// Partition 1: type 0x0c, start LBA 2048.
+	mbr[446+4] = 0x0c
+	mbr[446+8], mbr[446+9], mbr[446+10], mbr[446+11] = 0x00, 0x08, 0x00, 0x00
+	// Partition 2: unused.
+	f := filepath.Join(t.TempDir(), "mbr.bin")
+	if err := os.WriteFile(f, mbr, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fh, err := os.Open(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fh.Close()
+	off, err := mbrPartitionOffset(fh, 1)
+	if err != nil || off != 2048*512 {
+		t.Errorf("part 1 offset = %d,%v; want %d", off, err, 2048*512)
+	}
+	if _, err := mbrPartitionOffset(fh, 2); err == nil {
+		t.Error("unused partition: expected error")
+	}
+	if _, err := mbrPartitionOffset(fh, 5); err == nil {
+		// Entry beyond the table reads zeroed area; still must not panic.
+		t.Logf("part 5: %v", err)
+	}
+}

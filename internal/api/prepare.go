@@ -148,6 +148,9 @@ func (s *Server) treePreview(dest *queue.Destination, itemIDs []int64, forcedKin
 				warnings = append(warnings, fmt.Sprintf("%s: %v", it.Title, err))
 				continue
 			}
+			if cp.VCDBytes > queue.MaxVCDBytes {
+				warnings = append(warnings, fmt.Sprintf("%s: VCD would be %d bytes, over the ~2 GB POPSTARTER ceiling (still queueable)", it.Title, cp.VCDBytes))
+			}
 			addFile(cp.VCDPath)
 			addDir(cp.PopsDir)
 			for _, m := range cp.Manifests {

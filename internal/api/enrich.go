@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jo/TinyPS2Manager/internal/art"
 	"github.com/jo/TinyPS2Manager/internal/cheats"
+	"github.com/jo/TinyPS2Manager/internal/config"
 	"github.com/jo/TinyPS2Manager/internal/library"
 	"github.com/jo/TinyPS2Manager/internal/queue"
 	"github.com/jo/TinyPS2Manager/internal/riptopl"
@@ -33,6 +35,7 @@ func (s *Server) handleEnrich(w http.ResponseWriter, r *http.Request) {
 		Tag              string  `json:"tag"`
 		ConfirmUncertain bool    `json:"confirmUncertain"`
 		MissingOnly      bool    `json:"missingOnly"`
+		CheatSource      string  `json:"cheatSource"`
 	}
 	if err := decodeStrict(r, &body); err != nil {
 		writeErr(w, http.StatusBadRequest, "body", err.Error())
@@ -51,10 +54,18 @@ func (s *Server) handleEnrich(w http.ResponseWriter, r *http.Request) {
 	case "art":
 		s.enrichArt(w, r, dest, body.ItemIDs, body.MissingOnly)
 	case "cheats":
-		s.enrichCheats(w, r, dest, body.ItemIDs, body.ConfirmUncertain)
+		s.enrichCheats(w, r, dest, body.ItemIDs, body.ConfirmUncertain, body.CheatSource)
 	case "riptopl":
 		s.enrichRiptopl(w, r, dest, body.Tag)
 	}
+}
+
+// stageArt writes one cover under the destination write gate (spec §2.8:
+// enrich output lands strictly between game jobs, never interleaved).
+func stageArt(ctx context.Context, disk transfer.Disk, dest *queue.Destination, key string, data []byte) error {
+	unlock := queue.LockDestination(dest.Path)
+	defer unlock()
+	return art.Stage(ctx, disk, dest.Path, dest.BDMPrefix, key, data)
 }
 
 func (s *Server) enrichArt(w http.ResponseWriter, r *http.Request, dest *queue.Destination, itemIDs []int64, missingOnly bool) {
@@ -120,8 +131,8 @@ func (s *Server) enrichArt(w http.ResponseWriter, r *http.Request, dest *queue.D
 		if err != nil {
 			// Generate custom as fallback, flagged customArt
 			data = art.GenerateCustom(it.Title, it.Platform == library.PlatformPS2)
-			if err := art.Stage(ctx, disk, dest.Path, dest.BDMPrefix, key, data); err != nil {
-				results = append(results, result{ID: it.ID, Key: key, Status: "failed", Error: err.Error()})
+			if serr := stageArt(ctx, disk, dest, key, data); serr != nil {
+				results = append(results, result{ID: it.ID, Key: key, Status: "failed", Error: serr.Error()})
 				continue
 			}
 			results = append(results, result{ID: it.ID, Key: key, Status: "custom"})
@@ -130,8 +141,8 @@ func (s *Server) enrichArt(w http.ResponseWriter, r *http.Request, dest *queue.D
 		if norm, err := art.ValidateAndNormalize(data, it.Platform == library.PlatformPS2); err == nil {
 			data = norm
 		}
-		if err := art.Stage(ctx, disk, dest.Path, dest.BDMPrefix, key, data); err != nil {
-			results = append(results, result{ID: it.ID, Key: key, Status: "failed", Error: err.Error()})
+		if serr := stageArt(ctx, disk, dest, key, data); serr != nil {
+			results = append(results, result{ID: it.ID, Key: key, Status: "failed", Error: serr.Error()})
 			continue
 		}
 		results = append(results, result{ID: it.ID, Key: key, Status: "staged"})
@@ -139,7 +150,18 @@ func (s *Server) enrichArt(w http.ResponseWriter, r *http.Request, dest *queue.D
 	writeJSON(w, http.StatusOK, map[string]any{"results": results})
 }
 
-func (s *Server) enrichCheats(w http.ResponseWriter, r *http.Request, dest *queue.Destination, itemIDs []int64, confirm bool) {
+// cheatSourceOrder is the auto winner order (spec §2.9): hand-authored
+// files first (highest trust, never overwritten), then the widescreen
+// pack, then the title-keyed database. Never merge: one winner per game.
+var cheatSourceOrder = []string{"hand", "widescreen", "database"}
+
+func (s *Server) enrichCheats(w http.ResponseWriter, r *http.Request, dest *queue.Destination, itemIDs []int64, confirm bool, source string) {
+	switch source {
+	case "", "auto", "hand", "widescreen", "database":
+	default:
+		writeErr(w, http.StatusBadRequest, "cheatSource", "want auto, hand, widescreen or database")
+		return
+	}
 	var items []library.LibraryItem
 	if len(itemIDs) > 0 {
 		for _, id := range itemIDs {
@@ -160,62 +182,130 @@ func (s *Server) enrichCheats(w http.ResponseWriter, r *http.Request, dest *queu
 		}
 		items = all
 	}
-	// Load widescreen pack if present (optional dir)
-	wideMap, _ := cheats.ParseWidescreenDir("widescreen")
-	// Also try CheatDatabase.txt in cwd
+	settings, err := config.Load(s.settingsPath)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "", err.Error())
+		return
+	}
+	dbPath := firstNonEmpty(settings.CheatDatabasePath, "CheatDatabase.txt")
+	wideDir := firstNonEmpty(settings.WidescreenDir, "widescreen")
+	handDir := settings.HandCheatDir
+	// Load each source once. Missing sources are not errors: a forced
+	// source that finds nothing reports "missing" per item below.
+	var wideMap map[string][]byte
+	if source == "" || source == "auto" || source == "widescreen" {
+		wideMap, _ = cheats.ParseWidescreenDir(wideDir)
+	}
 	var dbMap map[string]cheats.RawGame
-	if raw, err := os.ReadFile("CheatDatabase.txt"); err == nil {
-		dbMap, _ = cheats.ParseDatabase(raw)
+	if source == "" || source == "auto" || source == "database" {
+		if raw, err := os.ReadFile(dbPath); err == nil {
+			dbMap, _ = cheats.ParseDatabase(raw)
+		}
 	}
 	disk := transfer.FileDisk{}
 	ctx := r.Context()
 	type result struct {
-		ID     int64  `json:"id"`
-		GameID string `json:"gameId"`
-		Status string `json:"status"`
-		Error  string `json:"error,omitempty"`
+		ID            int64  `json:"id"`
+		GameID        string `json:"gameId"`
+		Status        string `json:"status"`
+		Source        string `json:"source,omitempty"`
+		RegionMatched bool   `json:"regionMatched"`
+		EngineSkipped bool   `json:"engineSkipped,omitempty"`
+		Error         string `json:"error,omitempty"`
 	}
 	var results []result
 	for _, it := range items {
 		if it.Platform != library.PlatformPS2 || it.GameID == "" {
 			continue
 		}
-		var content string
-		var source string
-		if data, ok := wideMap[it.GameID]; ok {
-			content = string(data)
-			source = "widescreen"
-		} else if g, ok := dbMap[it.Title]; ok {
-			built, warns, err := cheats.Build(it.GameID, g.Cheats)
-			if err != nil {
-				results = append(results, result{ID: it.ID, GameID: it.GameID, Status: "failed", Error: err.Error()})
-				continue
-			}
-			if warns.HasEngineSkipped {
-				// still stage, but note warning
-			}
-			content = built
-			source = "database"
-			_ = source
-		} else {
-			results = append(results, result{ID: it.ID, GameID: it.GameID, Status: "missing"})
+		matched := cheats.RegionMatches(it.GameID, it.Title)
+		content, winner, warns, werr := pickCheatContent(it, source, wideMap, dbMap, handDir)
+		if werr != nil {
+			results = append(results, result{ID: it.ID, GameID: it.GameID, Status: "missing", RegionMatched: matched, Error: werr.Error()})
 			continue
 		}
-		// Stage
-		err := cheats.Stage(ctx, disk, dest.Path, dest.BDMPrefix, it, content, confirm)
-		if err != nil {
-			if strings.Contains(err.Error(), "explicit confirm") {
-				results = append(results, result{ID: it.ID, GameID: it.GameID, Status: "needs_confirm", Error: err.Error()})
-			} else if err == nil {
-				results = append(results, result{ID: it.ID, GameID: it.GameID, Status: "skipped"})
-			} else {
-				results = append(results, result{ID: it.ID, GameID: it.GameID, Status: "failed", Error: err.Error()})
+		unlock := queue.LockDestination(dest.Path)
+		serr := cheats.Stage(ctx, disk, dest.Path, dest.BDMPrefix, it, content, confirm)
+		unlock()
+		if serr != nil {
+			status := "failed"
+			if strings.Contains(serr.Error(), "explicit confirm") {
+				status = "needs_confirm"
 			}
+			results = append(results, result{ID: it.ID, GameID: it.GameID, Status: status, Source: winner, RegionMatched: matched, EngineSkipped: warns.HasEngineSkipped, Error: serr.Error()})
 			continue
 		}
-		results = append(results, result{ID: it.ID, GameID: it.GameID, Status: "staged"})
+		results = append(results, result{ID: it.ID, GameID: it.GameID, Status: "staged", Source: winner, RegionMatched: matched, EngineSkipped: warns.HasEngineSkipped})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"results": results})
+}
+
+// pickCheatContent selects one winner per game (never merged). source is
+// "auto" (hand > widescreen > database) or a forced source; a forced
+// source with nothing for this title is "missing", not a fallback.
+func pickCheatContent(it library.LibraryItem, source string, wideMap map[string][]byte, dbMap map[string]cheats.RawGame, handDir string) (content, winner string, warns cheats.Warnings, err error) {
+	try := func(name string) (string, cheats.Warnings, error) {
+		switch name {
+		case "hand":
+			if handDir == "" {
+				return "", cheats.Warnings{}, fmt.Errorf("no hand-cheat dir configured")
+			}
+			raw, rerr := readHandFile(handDir, it.GameID)
+			if rerr != nil {
+				return "", cheats.Warnings{}, rerr
+			}
+			w, verr := cheats.ValidateHand(string(raw))
+			if verr != nil {
+				return "", w, verr
+			}
+			return string(raw), w, nil
+		case "widescreen":
+			data, ok := wideMap[it.GameID]
+			if !ok {
+				return "", cheats.Warnings{}, fmt.Errorf("no widescreen entry for %s", it.GameID)
+			}
+			return string(data), cheats.Warnings{}, nil
+		case "database":
+			g, ok := dbMap[it.Title]
+			if !ok {
+				return "", cheats.Warnings{}, fmt.Errorf("no CheatDatabase entry for %q", it.Title)
+			}
+			return cheats.Build(it.GameID, g.Cheats)
+		}
+		return "", cheats.Warnings{}, fmt.Errorf("unknown cheat source %q", name)
+	}
+	if source != "" && source != "auto" {
+		c, w, e := try(source)
+		return c, source, w, e
+	}
+	var lastErr error
+	for _, name := range cheatSourceOrder {
+		c, w, e := try(name)
+		if e == nil {
+			return c, name, w, nil
+		}
+		lastErr = e
+	}
+	return "", "", cheats.Warnings{}, lastErr
+}
+
+// readHandFile reads <GameID>.cht (or .CHT) from a hand-authored dir.
+func readHandFile(dir, gameID string) ([]byte, error) {
+	for _, name := range []string{gameID + ".cht", gameID + ".CHT"} {
+		if raw, err := os.ReadFile(filepath.Join(dir, name)); err == nil {
+			return raw, nil
+		}
+	}
+	return nil, fmt.Errorf("no hand file for %s", gameID)
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func (s *Server) enrichRiptopl(w http.ResponseWriter, r *http.Request, dest *queue.Destination, tag string) {
@@ -235,7 +325,9 @@ func (s *Server) enrichRiptopl(w http.ResponseWriter, r *http.Request, dest *que
 		return
 	}
 	defer os.Remove(zipPath)
+	unlock := queue.LockDestination(dest.Path)
 	st, err := riptopl.Stage(ctx, transfer.FileDisk{}, dest.Path, dest.BDMPrefix, zipPath, nil)
+	unlock()
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "", err.Error())
 		return

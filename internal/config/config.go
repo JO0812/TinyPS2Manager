@@ -26,6 +26,13 @@ type Settings struct {
 	SplitThreshold    int64  `json:"splitThreshold"`
 	BDMprefixDefault  string `json:"bdmPrefixDefault"`
 	FilesystemDefault string `json:"filesystemDefault"`
+	// Cheat pack sources (spec §2.9): title-keyed CheatDatabase.txt,
+	// per-GameID widescreen .cht dir, and hand-authored .cht dir
+	// (highest trust, never overwritten). Empty = unset; the API
+	// still falls back to the process working directory.
+	CheatDatabasePath string `json:"cheatDatabasePath"`
+	WidescreenDir     string `json:"widescreenDir"`
+	HandCheatDir      string `json:"handCheatDir"`
 }
 
 // DefaultSplitThreshold is 4 GiB − 1 byte (the FAT32 ceiling, spec §2.2).

@@ -38,6 +38,11 @@ func UdisksLookup(partDev string) (UdisksInfo, error) {
 		if part, ok := ifaces["org.freedesktop.UDisks2.Partition"]; ok {
 			info.PartType = variantString(part["Type"])
 			tablePath, _ = part["Table"].Value().(dbus.ObjectPath)
+			if v, ok := part["Offset"]; ok {
+				if off, ok := v.Value().(uint64); ok {
+					info.PartOffset, info.HasOffset = off, true
+				}
+			}
 		}
 		if drive, ok := block["Drive"]; ok {
 			if p, ok := drive.Value().(dbus.ObjectPath); ok {

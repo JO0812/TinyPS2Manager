@@ -244,3 +244,53 @@ func TestPrepareExecuteNoLoader(t *testing.T) {
 		t.Fatalf("unknown item = %d, want 404", code)
 	}
 }
+
+func TestPreparePreviewVCDBigWarning(t *testing.T) {
+	h, cancel := newAPIHarness(t)
+	defer cancel()
+	srcDir := t.TempDir()
+	bigBin := filepath.Join(srcDir, "big.bin")
+	f, err := os.Create(bigBin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Just over 2 GiB, multiple of the 2352-byte sector size.
+	if err := f.Truncate(((2<<30)/2352 + 1) * 2352); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	cue := "FILE \"big.bin\" BINARY\n  TRACK 01 MODE2/2352\n    INDEX 01 00:00:00\n"
+	if err := os.WriteFile(filepath.Join(srcDir, "big.cue"), []byte(cue), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	destDir := t.TempDir()
+	if code, raw := h.do("POST", "/api/destinations", map[string]string{"path": destDir}); code != http.StatusCreated {
+		t.Fatalf("dest = %d\n%s", code, raw)
+	}
+	var items []libraryItemJSON
+	if code, raw := h.do("POST", "/api/library/import", map[string]string{"path": srcDir}); code != http.StatusCreated {
+		t.Fatalf("import = %d\n%s", code, raw)
+	} else if err := json.Unmarshal(raw, &items); err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("imported %d items, want 1 (the cue)", len(items))
+	}
+	var pv preparePreview
+	if code, raw := h.do("POST", "/api/destinations/prepare", map[string]any{
+		"destinationPath": destDir, "mode": "preview", "itemIds": []int64{items[0].ID},
+	}); code != http.StatusOK {
+		t.Fatalf("preview = %d\n%s", code, raw)
+	} else if err := json.Unmarshal(raw, &pv); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, wmsg := range pv.Warnings {
+		if strings.Contains(wmsg, "POPSTARTER ceiling") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("preview warnings = %v, want VCD ceiling warning", pv.Warnings)
+	}
+}

@@ -109,7 +109,12 @@ type ConvertPreview struct {
 	PopsDir   string
 	Manifests []ManifestPreview
 	VMCDirs   []string
+	VCDBytes  int64
 }
+
+// MaxVCDBytes is the POPSTARTER practical ceiling per VCD (spec §2.4):
+// larger images warn (never block) at plan time.
+const MaxVCDBytes = int64(2) << 30
 
 // PreviewConvert resolves VCD name, manifests, and VMC dirs without writing.
 func PreviewConvert(item *library.LibraryItem, dest *Destination, lib *library.Store) (*ConvertPreview, error) {
@@ -118,9 +123,10 @@ func PreviewConvert(item *library.LibraryItem, dest *Destination, lib *library.S
 		return nil, err
 	}
 	out := &ConvertPreview{
-		VCDPath: filepath.Join(p.popsDir, p.vcdName),
-		PopsDir: p.popsDir,
-		VMCDirs: p.vmcDirs,
+		VCDPath:  filepath.Join(p.popsDir, p.vcdName),
+		PopsDir:  p.popsDir,
+		VMCDirs:  p.vmcDirs,
+		VCDBytes: p.total,
 	}
 	for _, m := range p.manifests {
 		out.Manifests = append(out.Manifests, ManifestPreview{

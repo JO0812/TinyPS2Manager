@@ -209,3 +209,46 @@ func TestStage(t *testing.T) {
 		t.Fatalf("prefixed stat: %v", err)
 	}
 }
+
+func TestRegionMatches(t *testing.T) {
+	cases := []struct {
+		gameID, title string
+		want          bool
+	}{
+		{"SLUS_213.85", "Game (USA)", true},
+		{"SLUS_213.85", "Game (Europe)", false},
+		{"SLES_512.30", "Game (Europe)", true},
+		{"SLES_512.30", "Game (USA)", false},
+		{"SLPS_200.01", "Game (Japan)", true},
+		{"SLPS_200.01", "Game (U)", false},
+		{"SCUS_973.28", "Game [U]", true},
+		{"SLUS_213.85", "Untagged Game", true}, // no evidence of mismatch
+		{"", "Game (USA)", true},               // unknown serial
+		{"XXXX_000.00", "Game (Europe)", true}, // unknown prefix
+		{"SLUS_213.85", "Game (U) (Rerelease)", true},
+	}
+	for _, c := range cases {
+		if got := RegionMatches(c.gameID, c.title); got != c.want {
+			t.Errorf("RegionMatches(%q, %q) = %v, want %v", c.gameID, c.title, got, c.want)
+		}
+	}
+}
+
+func TestValidateHand(t *testing.T) {
+	good := "My Cheats\n90111111 11111111\nInfinite HP\n20111111 00000001\n"
+	if warns, err := ValidateHand(good); err != nil || warns.HasEngineSkipped || warns.DroppedCount != 0 {
+		t.Errorf("good hand file: warns=%+v err=%v", warns, err)
+	}
+	noMaster := "My Cheats\n20111111 00000001\n"
+	if _, err := ValidateHand(noMaster); err == nil || !strings.Contains(err.Error(), "no master") {
+		t.Errorf("missing master: expected error, got %v", err)
+	}
+	two := "A\n90111111 11111111\nB\n90222222 22222222\n"
+	if warns, err := ValidateHand(two); err == nil || !warns.HasMultipleMasters {
+		t.Errorf("two masters: warns=%+v err=%v", warns, err)
+	}
+	skipped := "M\n90111111 11111111\nC\n80111111 00000001\n"
+	if warns, err := ValidateHand(skipped); err != nil || !warns.HasEngineSkipped {
+		t.Errorf("8-type: warns=%+v err=%v", warns, err)
+	}
+}

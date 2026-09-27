@@ -36,11 +36,11 @@ api() { # method path [json]
 }
 
 echo "== destination =="
-DEST=$(api POST /api/destinations "{\"path\": \"$DEV\"}" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+api POST /api/destinations "{\"path\": \"$DEV\"}" >/dev/null
 # FAT32 override: small DVDs still copy (split needs >4GiB real files;
 # split-through-API is covered paused in integration tests, and 5GB demo
 # writes would blow tmpfs).
-api PATCH "/api/destinations/$DEST" '{"filesystemOverride": "fat32"}' >/dev/null
+api PATCH /api/destinations "{\"path\": \"$DEV\", \"filesystemOverride\": \"fat32\"}" >/dev/null
 
 echo "== import =="
 ITEMS=$(api POST /api/library/import "{\"path\": \"$FIX\"}")
@@ -54,7 +54,7 @@ echo "ids: $IDS"
 
 echo "== enqueue (copy + convert; small DVDs stay copy) =="
 # shellcheck disable=SC2086
-ENQ=$(api POST /api/queue "{\"destinationId\": $DEST, \"itemIds\": [$(echo $IDS | tr ' ' ',')]}")
+ENQ=$(api POST /api/queue "{\"destinationPath\": \"$DEV\", \"itemIds\": [$(echo $IDS | tr ' ' ',')]}")
 echo "$ENQ" | python3 -c "
 import json,sys
 kinds = sorted(j['kind'] for j in json.load(sys.stdin))

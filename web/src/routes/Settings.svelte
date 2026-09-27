@@ -64,6 +64,23 @@
       </select>
     </label>
 
+    <h2>Cheat sources</h2>
+    <label>
+      CheatDatabase.txt path
+      <input class="field" bind:value={settings.cheatDatabasePath} placeholder="(working directory)" />
+      <span class="hint">Title-keyed gameplay cheats (CheatDevice format). Mapped to GameIDs via the library.</span>
+    </label>
+    <label>
+      Widescreen pack directory
+      <input class="field" bind:value={settings.widescreenDir} placeholder="(working directory)" />
+      <span class="hint">Per-&lt;GameID&gt;.cht widescreen patches, used whole.</span>
+    </label>
+    <label>
+      Hand-authored cheats directory
+      <input class="field" bind:value={settings.handCheatDir} placeholder="(unset)" />
+      <span class="hint">Your own &lt;GameID&gt;.cht files. Highest trust — never overwritten, win automatically.</span>
+    </label>
+
     <button class="btn-primary" onclick={save}>Save settings</button>
   </div>
 {/if}

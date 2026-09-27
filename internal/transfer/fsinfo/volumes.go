@@ -1,12 +1,15 @@
 package fsinfo
 
 // UdisksInfo carries UDisks2 facts about one partition device: its
-// partition-table type, its own partition type byte, and the drive's
-// rotation rate. Empty strings / HasRotation=false mean "unknown".
+// partition-table type, its own partition type byte, its byte offset from
+// the start of the drive (spec §2.11 alignment), and the drive's rotation
+// rate. Empty strings / Has*=false mean "unknown".
 type UdisksInfo struct {
 	Table        string // dos, gpt, or "" when unknown
 	PartType     string // 0x0c etc, or "" when unknown
-	RotationRate int32  // <0 = non-rotating (flash); >=0 = RPM or unknown
+	PartOffset   uint64 // byte offset of the partition start
+	HasOffset    bool
+	RotationRate int32 // <0 = non-rotating (flash); >=0 = RPM or unknown
 	HasRotation  bool
 }
 
