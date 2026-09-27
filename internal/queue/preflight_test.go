@@ -40,22 +40,46 @@ func TestPreflightFolder(t *testing.T) {
 func TestPreflightFilesystemMismatch(t *testing.T) {
 	dir := t.TempDir()
 	dest := Destination{Path: dir, Kind: DestFolder, Filesystem: "unknown", FSOverride: "fat32"}
-	// Actual probe on temp dir will be overlay/tmpfs, not fat32, so mismatch should fail
+	// Folders stage for a future target, so the filesystem row must never
+	// fail-closed here (warn when the host differs, pass when unknowable);
+	// planning still honors the toggle. Exact verdicts are pinned by
+	// TestFsToggleVerdict; this only wires the verdict into Preflight.
 	res, err := Preflight(&dest)
 	if err != nil {
 		t.Fatal(err)
 	}
-	blocked := false
 	for _, c := range res.Checks {
 		if c.Name == "filesystem" && c.Status == CheckFail {
-			blocked = true
+			t.Errorf("folder fs row must not fail: %+v", res.Checks)
 		}
 	}
-	if !blocked {
-		t.Errorf("filesystem mismatch should fail: %+v", res.Checks)
+	if res.Blocked {
+		t.Errorf("folder fs mismatch must not block: %+v", res.Checks)
 	}
-	if !res.Blocked {
-		t.Error("result Blocked should be true on fs mismatch")
+}
+
+func TestFsToggleVerdict(t *testing.T) {
+	cases := []struct {
+		kind          DestinationKind
+		detected, eff string
+		want          string
+	}{
+		{DestDrive, "fat32", "fat32", CheckPass},
+		{DestDrive, "exfat", "exfat", CheckPass},
+		{DestDrive, "unknown", "fat32", CheckPass},
+		{DestDrive, "ext4", "", CheckWarn},
+		{DestDrive, "ext4", "unknown", CheckWarn},
+		{DestDrive, "ext4", "fat32", CheckFail},
+		{DestDrive, "vfat", "exfat", CheckFail},
+		{DestFolder, "ext4", "fat32", CheckWarn},
+		{DestFolder, "ext4", "", CheckWarn},
+		{DestFolder, "fat32", "fat32", CheckPass},
+	}
+	for _, c := range cases {
+		if got, _ := fsToggleVerdict(c.kind, c.detected, c.eff); got != c.want {
+			t.Errorf("fsToggleVerdict(%q, %q, %q) = %q, want %q",
+				c.kind, c.detected, c.eff, got, c.want)
+		}
 	}
 }
 

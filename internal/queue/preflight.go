@@ -67,13 +67,10 @@ func Preflight(dest *Destination) (*Result, error) {
 	} else {
 		detected := normalizeFSType(fstype)
 		eff := strings.ToLower(dest.EffectiveFilesystem())
-		if eff == "" || eff == "unknown" {
-			add("filesystem", CheckWarn, fmt.Sprintf("detected %q but effective filesystem is unknown: set FAT32/exFAT toggle", detected))
-		} else if eff != detected && detected != "unknown" {
-			add("filesystem", CheckFail, fmt.Sprintf("filesystem is %q, expected %q (mismatch with FAT32/exFAT toggle)", detected, eff))
+		status, msg := fsToggleVerdict(dest.Kind, detected, eff)
+		add("filesystem", status, msg)
+		if status == CheckFail {
 			markBlocked()
-		} else {
-			add("filesystem", CheckPass, fmt.Sprintf("filesystem %q matches toggle %q", detected, eff))
 		}
 		// 2. Free-space probe
 		if freeBytes >= 0 {
@@ -196,6 +193,25 @@ func Preflight(dest *Destination) (*Result, error) {
 	}
 
 	return &Result{Checks: checks, Blocked: blocked}, nil
+}
+
+// fsToggleVerdict compares the detected host filesystem against the
+// effective (toggle) filesystem. Drives are fail-closed on mismatch: the
+// toggle must describe the live volume. Folders stage content for a future
+// target (spec §2.11/Goal 5: "a local folder the user will image later"),
+// so a host-vs-toggle mismatch only warns — planning and splitting still
+// honor the toggle.
+func fsToggleVerdict(kind DestinationKind, detected, eff string) (string, string) {
+	if eff == "" || eff == "unknown" {
+		return CheckWarn, fmt.Sprintf("detected %q but effective filesystem is unknown: set FAT32/exFAT toggle", detected)
+	}
+	if eff == detected || detected == "unknown" {
+		return CheckPass, fmt.Sprintf("filesystem %q matches toggle %q", detected, eff)
+	}
+	if kind == DestFolder {
+		return CheckWarn, fmt.Sprintf("folder is on %q but target toggle is %q: FAT32/exFAT rules apply per toggle at plan time", detected, eff)
+	}
+	return CheckFail, fmt.Sprintf("filesystem is %q, expected %q (mismatch with FAT32/exFAT toggle)", detected, eff)
 }
 
 func normalizeFSType(raw string) string {

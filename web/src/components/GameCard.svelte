@@ -89,9 +89,13 @@
   }
 
   let cheatSource = 'auto';
+  // Uncertain GameIDs (mods/translations) need an explicit second click
+  // before any cheat file is staged (spec §2.9/§6b.3).
+  let confirmCheats = false;
 
-  async function stageCheats() {
+  async function stageCheats(confirmed: boolean) {
     menuOpen = false;
+    confirmCheats = false;
     const dp = destPath();
     if (!dp) return;
     busy = 'cheats';
@@ -100,7 +104,7 @@
       await api.enrich('cheats', {
         destinationPath: dp,
         itemIds: [item.id],
-        confirmUncertain: item.gameIdUncertain,
+        confirmUncertain: confirmed,
         cheatSource,
       });
       await loadEnrich();
@@ -110,6 +114,14 @@
     } finally {
       busy = '';
     }
+  }
+
+  function askStageCheats() {
+    if (item.gameIdUncertain && !confirmCheats) {
+      confirmCheats = true;
+      return;
+    }
+    void stageCheats(false);
   }
 
   async function setType(discType: string) {
@@ -224,7 +236,7 @@
       </div>
     {/if}
     <div class="menu-wrap">
-      <button class="dots" onclick={() => (menuOpen = !menuOpen)} aria-label="Game actions">…</button>
+      <button class="dots" onclick={() => { menuOpen = !menuOpen; confirmCheats = false; }} aria-label="Game actions">…</button>
       {#if menuOpen}
         <div class="menu">
           <button onclick={enqueue} disabled={busy !== ''}>
@@ -248,7 +260,15 @@
                 <option value="database">Cheat DB</option>
               </select>
             </label>
-            <button onclick={stageCheats} disabled={busy !== ''} title="Stage PS2RD cheats for this title">Stage cheats</button>
+            {#if confirmCheats}
+              <div class="menu-row warn" title="This serial may name a different base game">
+                <span>Uncertain ID — stage anyway?</span>
+              </div>
+              <button onclick={() => stageCheats(true)} disabled={busy !== ''}>Confirm stage</button>
+              <button onclick={() => (confirmCheats = false)} disabled={busy !== ''}>Cancel</button>
+            {:else}
+              <button onclick={askStageCheats} disabled={busy !== ''} title="Stage PS2RD cheats for this title">Stage cheats</button>
+            {/if}
           {/if}
           <button onclick={startRename}>Rename…</button>
         </div>
@@ -391,6 +411,10 @@
     padding: 4px 6px;
     color: var(--fg);
     font-size: 12px;
+  }
+  .menu-row.warn {
+    color: var(--warning);
+    font-weight: 600;
   }
   .rename {
     padding: 6px 8px;
