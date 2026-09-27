@@ -36,3 +36,8 @@ testdata/*.db
 .oplbm.env
 # Flatpak staged binary (built by scripts/build-flatpak.sh, shipped via dir source)
 /flatpak/oplbm
+# Flatpak build dirs (repo + build tree + bundle output)
+/repo/
+/flatpak-build/
+/.flatpak-builder/
+*.flatpak
