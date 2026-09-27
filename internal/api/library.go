@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"sort"
+	"strings"
 
 	"github.com/jo/TinyPS2Manager/internal/config"
 	"github.com/jo/TinyPS2Manager/internal/library"
@@ -143,25 +145,20 @@ func (s *Server) handleLibraryPatch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDestinationsList(w http.ResponseWriter, r *http.Request) {
-	dests, err := s.qstore.ListDestinations()
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "", err.Error())
-		return
-	}
-	out := make([]destinationJSON, 0, len(dests))
-	for _, d := range dests {
-		probed, err := transfer.Probe(d.Path)
-		if err == nil {
-			_ = s.qstore.RefreshDestinationStats(d.ID, string(probed.Filesystem), probed.FreeBytes, probed.TotalBytes)
-			d.Filesystem, d.FreeBytes, d.TotalBytes = string(probed.Filesystem), probed.FreeBytes, probed.TotalBytes
+	out := make([]destinationJSON, 0)
+	for path := range queue.LivePaths(s.qstore) {
+		d, err := queue.ResolveDestination(s.qstore, path)
+		if err != nil {
+			continue
 		}
-		out = append(out, toDestinationJSON(d))
+		out = append(out, toDestinationJSON(*d))
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	writeJSON(w, http.StatusOK, out)
 }
 
-// volumeJSON is one detected external drive plus whether it is already
-// tracked as a destination (matched by path).
+// volumeJSON is one detected external drive plus whether it already has
+// stored customization (matched by path).
 type volumeJSON struct {
 	Path       string `json:"path"`
 	Label      string `json:"label"`
@@ -179,9 +176,9 @@ func (s *Server) handleVolumesList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	added := map[string]bool{}
-	if dests, err := s.qstore.ListDestinations(); err == nil {
-		for _, d := range dests {
-			added[d.Path] = true
+	if sts, err := s.qstore.ListSettings(); err == nil {
+		for _, st := range sts {
+			added[st.Path] = true
 		}
 	}
 	out := make([]volumeJSON, 0, len(vols))
@@ -231,45 +228,49 @@ func (s *Server) handleDestinationsCreate(w http.ResponseWriter, r *http.Request
 		writeErr(w, http.StatusBadRequest, "bdmPrefix", err.Error())
 		return
 	}
-	probed, _ := transfer.Probe(body.Path)
-	d, err := s.qstore.AddDestination(queue.Destination{
-		Path: body.Path, Kind: kind, Filesystem: string(probed.Filesystem),
+	if err := s.qstore.UpsertSettings(queue.DestinationSettings{
+		Path: body.Path, Kind: kind,
 		FSOverride: body.FilesystemOverride, BDMPrefix: body.BDMPrefix,
-		FreeBytes: probed.FreeBytes, TotalBytes: probed.TotalBytes,
-	})
+	}); err != nil {
+		writeErr(w, http.StatusInternalServerError, "", err.Error())
+		return
+	}
+	d, err := queue.ResolveDestination(s.qstore, body.Path)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusCreated, toDestinationJSON(d))
+	writeJSON(w, http.StatusCreated, toDestinationJSON(*d))
 }
 
 func (s *Server) handleDestinationsPatch(w http.ResponseWriter, r *http.Request) {
-	id, err := pathID(r, "id")
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, "id", err.Error())
-		return
-	}
 	var raw map[string]json.RawMessage
 	if err := decodeStrict(r, &raw); err != nil {
 		writeErr(w, http.StatusBadRequest, "body", err.Error())
 		return
 	}
-	if len(raw) == 0 {
-		writeErr(w, http.StatusBadRequest, "body", "nothing to update")
+	pathRaw, ok := raw["path"]
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "path", "path is required")
 		return
 	}
-	d, err := s.qstore.GetDestination(id)
+	var path string
+	if err := json.Unmarshal(pathRaw, &path); err != nil || path == "" {
+		writeErr(w, http.StatusBadRequest, "path", "want a non-empty string")
+		return
+	}
+	cur, err := s.qstore.GetSettings(path)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "", err.Error())
 		return
 	}
-	if d == nil {
-		writeErr(w, http.StatusNotFound, "id", "no such destination")
-		return
+	merged := queue.DestinationSettings{Path: path, Kind: queue.DestFolder}
+	if cur != nil {
+		merged = *cur
 	}
 	for key, val := range raw {
 		switch key {
+		case "path":
 		case "bdmPrefix":
 			var prefix string
 			if err := json.Unmarshal(val, &prefix); err != nil {
@@ -280,10 +281,7 @@ func (s *Server) handleDestinationsPatch(w http.ResponseWriter, r *http.Request)
 				writeErr(w, http.StatusBadRequest, "bdmPrefix", err.Error())
 				return
 			}
-			if err := s.qstore.UpdateDestinationPrefix(id, prefix); err != nil {
-				writeErr(w, http.StatusInternalServerError, "", err.Error())
-				return
-			}
+			merged.BDMPrefix = prefix
 		case "filesystemOverride":
 			var ov string
 			if err := json.Unmarshal(val, &ov); err != nil ||
@@ -291,16 +289,17 @@ func (s *Server) handleDestinationsPatch(w http.ResponseWriter, r *http.Request)
 				writeErr(w, http.StatusBadRequest, "filesystemOverride", "want \"\", \"fat32\" or \"exfat\"")
 				return
 			}
-			if err := s.qstore.UpdateDestinationOverride(id, ov); err != nil {
-				writeErr(w, http.StatusInternalServerError, "", err.Error())
-				return
-			}
+			merged.FSOverride = ov
 		default:
 			writeErr(w, http.StatusBadRequest, key, "unknown field")
 			return
 		}
 	}
-	updated, err := s.qstore.GetDestination(id)
+	if err := s.qstore.UpsertSettings(merged); err != nil {
+		writeErr(w, http.StatusInternalServerError, "", err.Error())
+		return
+	}
+	updated, err := queue.ResolveDestination(s.qstore, path)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "", err.Error())
 		return
@@ -309,23 +308,24 @@ func (s *Server) handleDestinationsPatch(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleDestinationsDelete(w http.ResponseWriter, r *http.Request) {
-	id, err := pathID(r, "id")
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, "id", err.Error())
+	var body struct {
+		Path string `json:"path"`
+	}
+	if err := decodeStrict(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "body", err.Error())
 		return
 	}
-	d, err := s.qstore.GetDestination(id)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "", err.Error())
+	if body.Path == "" {
+		writeErr(w, http.StatusBadRequest, "path", "path is required")
 		return
 	}
-	if d == nil {
-		writeErr(w, http.StatusNotFound, "id", "no such destination")
-		return
-	}
-	if err := s.qstore.DeleteDestination(id); err != nil {
+	if err := s.qstore.DeleteSettings(body.Path); err != nil {
 		if errors.Is(err, queue.ErrDestinationHasJobs) {
-			writeErr(w, http.StatusConflict, "id", err.Error())
+			writeErr(w, http.StatusConflict, "path", err.Error())
+			return
+		}
+		if strings.Contains(err.Error(), "no customization") {
+			writeErr(w, http.StatusNotFound, "path", err.Error())
 			return
 		}
 		writeErr(w, http.StatusInternalServerError, "", err.Error())

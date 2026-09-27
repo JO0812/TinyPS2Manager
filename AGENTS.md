@@ -5,18 +5,18 @@
 scripts/build-web.sh          # npm ci + vite build -> web/dist (rewrites web/dist/README.md placeholder)
 scripts/build.sh              # build-web.sh + gen-third-party.sh + go build dist/oplbm + wails build -tags "desktop webkit2_41" -> build/bin/ when Wails installed
 scripts/gen-third-party.sh    # regenerates THIRD_PARTY.md + licenses/ (licenses/ is gitignored, shipped in Wails bundles)
-GOOS=windows GOARCH=amd64 go build -o dist/oplbm.exe ./cmd/oplbm  # pure-Go cross-build, no -tags desktop
+GOOS=windows GOARCH=amd64 go build -o dist/oplbm.exe .  # pure-Go cross-build, no -tags desktop
 ```
 
 * `web/dist/README.md` is a committed placeholder so `go:embed web/dist` compiles on fresh clones (Go ignores dotfiles). `vite build` empties `dist/`; `build-web.sh` rewrites it byte-identical — don't delete.
 * `THIRD_PARTY.md` is committed; `licenses/` is not (CI generates it). Every Wails bundle must contain both.
-* `cmd/oplbm/desktop.go` is `//go:build desktop` — isolates cgo/Wails. Default `go build ./...` stays cgo-free.
+* `desktop.go` (repo root, `//go:build desktop`) — isolates cgo/Wails; the main package lives at root because Wails builds the project root. Default `go build ./...` stays cgo-free.
 
 ## Verify (run in order, CI does)
 ```
 go vet ./...
 go vet -tags desktop ./...                         # separate, desktop tag pulls Wails/cgo
-gofmt -l cmd internal testdata scripts             # must be empty
+gofmt -l .                                        # must be empty (matches CI)
 go test ./...                                      # unit + integration + invariants (internal/invariants)
 cd web && npm run check                            # svelte-check + tsc
 cd web && npm run build                            # vite, budget 250 KiB uncompressed (CI warns)
@@ -48,7 +48,7 @@ scripts/e2e.sh                                     # CLI + API + browser UI; UI 
 * Enrichment (art/cheats/riptopl) is explicit per-action network (show URL before fetch, record digest after). Offline still queues/boots.
 
 ## Architecture (where things live)
-* `cmd/oplbm/` — CLI (`import/inspect/convert/split/tree/serve/gameid/art/cheats/riptopl/preflight`) + `serve` + Wails shell
+* `./*.go` (root main) — CLI (`import/inspect/convert/split/tree/serve/gameid/art/cheats/riptopl/preflight`) + `serve` + Wails shell
 * `internal/library` — scan/hash (SHA-256 of first 1 MiB + size), 4-step CD/DVD detector (`override/inspected/heuristic/database`), `GameID` via streaming `SYSTEM.CNF` `BOOT2`, SQLite store
 * `internal/isotool` — ISO9660 PVD + UDF `NSR02/03` scan (read-only, streaming)
 * `internal/cuebin` — hand-written CUE lexer + streaming `VCD` writer (2352-byte sectors, pregap `INDEX 00`, `2 MiB` buffer)

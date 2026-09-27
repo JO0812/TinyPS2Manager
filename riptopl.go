@@ -14,18 +14,18 @@ import (
 func cmdRiptopl(args []string) error {
 	fs := flag.NewFlagSet("riptopl", flag.ContinueOnError)
 	dbPath := fs.String("db", "", "SQLite path (default $CONFIG/oplbm/oplbm.db)")
-	var deviceID int64
+	var devicePath string
 	var tag string
-	fs.Int64Var(&deviceID, "device", 0, "destination id")
+	fs.StringVar(&devicePath, "device", "", "destination path")
 	fs.StringVar(&tag, "tag", riptopl.DefaultTag, "release tag (current-fan-favorite or rolling)")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: oplbm riptopl --device <id> [--tag rolling] [--db path]\n")
+		fmt.Fprintf(os.Stderr, "Usage: oplbm riptopl --device <path> [--tag rolling] [--db path]\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if deviceID == 0 {
+	if devicePath == "" {
 		fs.Usage()
 		return fmt.Errorf("--device is required")
 	}
@@ -38,12 +38,12 @@ func cmdRiptopl(args []string) error {
 		return err
 	}
 	defer qstore.Close()
-	dest, err := qstore.GetDestination(deviceID)
+	dest, err := queue.ResolveDestination(qstore, devicePath)
 	if err != nil {
 		return err
 	}
 	if dest == nil {
-		return fmt.Errorf("no destination %d", deviceID)
+		return fmt.Errorf("no destination %q", devicePath)
 	}
 	client := &riptopl.Client{}
 	ctx := context.Background()
@@ -71,6 +71,6 @@ func cmdRiptopl(args []string) error {
 		fmt.Printf("%d. %s\n", i+1, step)
 	}
 	// Record pinned version in queue state
-	_ = qstore.SetState(fmt.Sprintf("loader.%d", dest.ID), fmt.Sprintf("%s %s %s", rel.Tag, rel.AssetName, rel.Digest))
+	_ = qstore.SetState(fmt.Sprintf("loader.%s", dest.Path), fmt.Sprintf("%s %s %s", rel.Tag, rel.AssetName, rel.Digest))
 	return nil
 }

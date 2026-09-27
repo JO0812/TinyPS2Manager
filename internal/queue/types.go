@@ -35,21 +35,22 @@ const (
 
 // Job is one queued transfer (spec §8). Attempts counts failed tries;
 // the executor auto-retries write-phase failures up to MaxAttempts, then
-// parks the job in error for the user.
+// parks the job in error for the user. The destination is a path, not an
+// id, so jobs survive replugs and need no registry row.
 type Job struct {
-	ID            int64
-	LibraryItemID int64
-	DestinationID int64
-	Kind          JobKind
-	Order         int
-	Status        JobStatus
-	Phase         string
-	BytesTotal    int64
-	BytesDone     int64
-	Error         string
-	Attempts      int
-	CreatedAt     string
-	UpdatedAt     string
+	ID              int64
+	LibraryItemID   int64
+	DestinationPath string
+	Kind            JobKind
+	Order           int
+	Status          JobStatus
+	Phase           string
+	BytesTotal      int64
+	BytesDone       int64
+	Error           string
+	Attempts        int
+	CreatedAt       string
+	UpdatedAt       string
 }
 
 // MaxAttempts caps automatic retries (plan §6.2); manual Retry resets the
@@ -64,18 +65,31 @@ const (
 	DestFolder DestinationKind = "folder"
 )
 
-// Destination is one transfer target (spec §8). Filesystem holds the
-// effective value (detected, or the user's override choice); FSOverride
-// records an explicit user choice ("fat32"/"exfat"/""), empty meaning none.
-type Destination struct {
-	ID         int64
+// DestinationSettings is the persisted per-path customization (kind,
+// prefix, override). Everything else about a destination is resolved live.
+type DestinationSettings struct {
 	Path       string
+	Kind       DestinationKind
+	FSOverride string
+	BDMPrefix  string
+	UpdatedAt  string
+}
+
+// Destination is one resolved transfer target (spec §8): user settings
+// merged with live detection. Filesystem holds the detected value;
+// FSOverride records an explicit user choice ("fat32"/"exfat"/""),
+// empty meaning none. Customized reports a stored settings row. Label is
+// the volume label for drives, "" otherwise.
+type Destination struct {
+	Path       string
+	Label      string
 	Kind       DestinationKind
 	Filesystem string
 	FSOverride string
 	BDMPrefix  string
 	FreeBytes  int64
 	TotalBytes int64
+	Customized bool
 	UpdatedAt  string
 }
 

@@ -54,7 +54,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - run: GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o dist/oplbm-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./cmd/oplbm
+      - run: GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o dist/oplbm-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} .
 
   wails:
     # Wails desktop bundles per OS; each archive ships the Wails-built
@@ -160,7 +160,7 @@ jobs:
           ./scripts/gen-third-party.sh
           mkdir -p dist
           # Headless Linux tarball (pure Go, no Wails) — complements Wails desktop bundles
-          GOOS=linux GOARCH=amd64 go build -o dist/oplbm ./cmd/oplbm
+          GOOS=linux GOARCH=amd64 go build -o dist/oplbm .
           mkdir -p dist/headless-stage
           cp dist/oplbm dist/headless-stage/
           cp THIRD_PARTY.md dist/headless-stage/

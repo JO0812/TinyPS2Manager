@@ -10,9 +10,9 @@ import (
 
 func (s *Server) handleQueueEnqueue(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		DestinationID int64   `json:"destinationId"`
-		ItemIDs       []int64 `json:"itemIds"`
-		Kind          *string `json:"kind"`
+		DestinationPath string  `json:"destinationPath"`
+		ItemIDs         []int64 `json:"itemIds"`
+		Kind            *string `json:"kind"`
 	}
 	if err := decodeStrict(r, &body); err != nil {
 		writeErr(w, http.StatusBadRequest, "body", err.Error())
@@ -28,7 +28,7 @@ func (s *Server) handleQueueEnqueue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	jobs, apiErr := s.enqueueItems(body.DestinationID, body.ItemIDs, kind)
+	jobs, apiErr := s.enqueueItems(body.DestinationPath, body.ItemIDs, kind)
 	if apiErr != nil {
 		writeErr(w, apiErr.status, apiErr.field, apiErr.msg)
 		return
@@ -54,22 +54,19 @@ func (e *apiError) Error() string { return e.msg }
 // by POST /api/queue and the prepare-execute flow. If kind is non-empty
 // it forces that kind for PS1 items (ember); PS2 items with a forced PS1
 // kind fail closed.
-func (s *Server) enqueueItems(destinationID int64, itemIDs []int64, kind queue.JobKind) ([]queue.Job, *apiError) {
+func (s *Server) enqueueItems(destinationPath string, itemIDs []int64, kind queue.JobKind) ([]queue.Job, *apiError) {
 	fail := func(status int, field, msg string) ([]queue.Job, *apiError) {
 		return nil, &apiError{status: status, field: field, msg: msg}
 	}
-	if destinationID <= 0 {
-		return fail(http.StatusBadRequest, "destinationId", "want a positive id")
+	if destinationPath == "" {
+		return fail(http.StatusBadRequest, "destinationPath", "want a destination path")
 	}
 	if len(itemIDs) == 0 {
 		return fail(http.StatusBadRequest, "itemIds", "want at least one item id")
 	}
-	dest, err := s.qstore.GetDestination(destinationID)
+	dest, err := queue.ResolveDestination(s.qstore, destinationPath)
 	if err != nil {
 		return fail(http.StatusInternalServerError, "", err.Error())
-	}
-	if dest == nil {
-		return fail(http.StatusNotFound, "destinationId", "no such destination")
 	}
 	if dest.EffectiveFilesystem() != "fat32" && dest.EffectiveFilesystem() != "exfat" {
 		return fail(http.StatusUnprocessableEntity, "destination",
@@ -120,7 +117,7 @@ func (s *Server) enqueueItems(destinationID int64, itemIDs []int64, kind queue.J
 		plan = append(plan, staged{kind: k, total: total, item: itemID})
 		need += total
 	}
-	inFlight, err := s.qstore.InFlightBytes(dest.ID)
+	inFlight, err := s.qstore.InFlightBytes(dest.Path)
 	if err != nil {
 		return fail(http.StatusInternalServerError, "", err.Error())
 	}
@@ -131,7 +128,7 @@ func (s *Server) enqueueItems(destinationID int64, itemIDs []int64, kind queue.J
 	var rows []queue.Job
 	for _, p := range plan {
 		rows = append(rows, queue.Job{
-			LibraryItemID: p.item, DestinationID: dest.ID,
+			LibraryItemID: p.item, DestinationPath: dest.Path,
 			Kind: p.kind, BytesTotal: p.total,
 		})
 	}
@@ -244,7 +241,7 @@ func (s *Server) cancelJob(id int64) error {
 		return fmt.Errorf("no such job")
 	}
 	if job.Status == queue.JobRunning && s.exec != nil {
-		if !s.exec.CancelDestination(job.DestinationID) {
+		if !s.exec.CancelDestination(job.DestinationPath) {
 			return fmt.Errorf("executor is not running this job")
 		}
 		deadline := time.Now().Add(10 * time.Second)

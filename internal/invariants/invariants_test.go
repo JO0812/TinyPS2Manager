@@ -425,10 +425,8 @@ func TestN4_ValidationFirst(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		dest, err := qs.AddDestination(queue.Destination{Path: t.TempDir(), Kind: queue.DestFolder})
-		if err != nil {
-			t.Fatal(err)
-		}
+		destPath := t.TempDir()
+		dest := queue.Destination{Path: destPath, Kind: queue.DestFolder}
 		// No disc type set -> Estimate must fail closed.
 		if _, _, err := queue.Estimate(&library.LibraryItem{ID: it.ID, SourcePath: p, Platform: library.PlatformPS2, Title: "T"}, &dest, ls); err == nil {
 			t.Fatal("unset disc type: expected error")
@@ -467,10 +465,8 @@ func TestN4_ValidationFirst(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer ls.Close()
-		dest, err := qs.AddDestination(queue.Destination{Path: t.TempDir(), Kind: queue.DestFolder})
-		if err != nil {
-			t.Fatal(err)
-		}
+		destPath := t.TempDir()
+		dest := queue.Destination{Path: destPath, Kind: queue.DestFolder}
 		// Create two PS1 items in a group that will exceed 4 discs.
 		group := int64(1)
 		var ids []int64
@@ -488,8 +484,8 @@ func TestN4_ValidationFirst(t *testing.T) {
 		exec := queue.New(qs, ls, transfer.FileDisk{}, "")
 		srv := api.New(qs, ls, filepath.Join(t.TempDir(), "settings.json"), exec)
 		body, _ := json.Marshal(map[string]any{
-			"destinationId": dest.ID,
-			"itemIds":       ids,
+			"destinationPath": dest.Path,
+			"itemIds":         ids,
 		})
 		req := httptest.NewRequest(http.MethodPost, "/api/queue", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -554,10 +550,7 @@ func TestN5_OneWriterPerDestination(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer ls.Close()
-		dest, err := qs.AddDestination(queue.Destination{Path: t.TempDir(), Kind: queue.DestFolder, Filesystem: "exfat"})
-		if err != nil {
-			t.Fatal(err)
-		}
+		dest := queue.Destination{Path: t.TempDir(), Kind: queue.DestFolder, Filesystem: "exfat"}
 		srcDir := t.TempDir()
 		var ids []int64
 		for i := 0; i < 3; i++ {
@@ -570,9 +563,9 @@ func TestN5_OneWriterPerDestination(t *testing.T) {
 			ids = append(ids, it.ID)
 		}
 		if _, err := qs.Enqueue([]queue.Job{
-			{LibraryItemID: ids[0], DestinationID: dest.ID, Kind: queue.KindCopy, BytesTotal: 1 << 20},
-			{LibraryItemID: ids[1], DestinationID: dest.ID, Kind: queue.KindCopy, BytesTotal: 1 << 20},
-			{LibraryItemID: ids[2], DestinationID: dest.ID, Kind: queue.KindCopy, BytesTotal: 1 << 20},
+			{LibraryItemID: ids[0], DestinationPath: dest.Path, Kind: queue.KindCopy, BytesTotal: 1 << 20},
+			{LibraryItemID: ids[1], DestinationPath: dest.Path, Kind: queue.KindCopy, BytesTotal: 1 << 20},
+			{LibraryItemID: ids[2], DestinationPath: dest.Path, Kind: queue.KindCopy, BytesTotal: 1 << 20},
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -617,16 +610,16 @@ func TestN5_OneWriterPerDestination(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer b.Close()
-		if err := a.AcquireLock(7, "owner-a"); err != nil {
+		if err := a.AcquireLock("/locks/x", "owner-a"); err != nil {
 			t.Fatalf("acquire: %v", err)
 		}
-		if err := b.AcquireLock(7, "owner-b"); err == nil {
+		if err := b.AcquireLock("/locks/x", "owner-b"); err == nil {
 			t.Fatal("double acquire: expected error")
 		}
-		if err := a.ReleaseLock(7, "owner-a"); err != nil {
+		if err := a.ReleaseLock("/locks/x", "owner-a"); err != nil {
 			t.Fatal(err)
 		}
-		if err := b.AcquireLock(7, "owner-b"); err != nil {
+		if err := b.AcquireLock("/locks/x", "owner-b"); err != nil {
 			t.Fatalf("re-acquire after release: %v", err)
 		}
 	})
@@ -757,22 +750,20 @@ func TestN6_StatePersists(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		dest, err := qs.AddDestination(queue.Destination{Path: t.TempDir(), Kind: queue.DestFolder})
-		if err != nil {
-			t.Fatal(err)
-		}
+		destPath := t.TempDir()
+		dest := queue.Destination{Path: destPath, Kind: queue.DestFolder}
 		p := filepath.Join(t.TempDir(), "g.iso")
 		content := make([]byte, 1<<20)
 		_, _ = rand.Read(content)
 		_ = os.WriteFile(p, content, 0o644)
 		it, _ := ls.UpsertItem(library.LibraryItem{SourcePath: p, ContentHash: "rk", Platform: library.PlatformPS2, Title: "G", SizeBytes: 1 << 20})
 		_ = ls.UpdateDetection(it.ID, library.DiscDVD, library.MethodHeuristic)
-		jobs, err := qs.Enqueue([]queue.Job{{LibraryItemID: it.ID, DestinationID: dest.ID, Kind: queue.KindCopy, BytesTotal: 1 << 20}})
+		jobs, err := qs.Enqueue([]queue.Job{{LibraryItemID: it.ID, DestinationPath: dest.Path, Kind: queue.KindCopy, BytesTotal: 1 << 20}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		// Simulate crash: claim the job, leave it running, orphan a temp, then close.
-		if _, ok, err := qs.NextPending(dest.ID); err != nil || !ok {
+		if _, ok, err := qs.NextPending(dest.Path); err != nil || !ok {
 			t.Fatalf("claim = %v %v", ok, err)
 		}
 		stale := filepath.Join(dest.Path, "DVD", ".oplbm.deadbeef")

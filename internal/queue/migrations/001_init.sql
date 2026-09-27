@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS schema_version (
 CREATE TABLE IF NOT EXISTS jobs (
   id               INTEGER PRIMARY KEY AUTOINCREMENT,
   library_item_id  INTEGER NOT NULL REFERENCES library_items(id),
-  destination_id   INTEGER NOT NULL REFERENCES destinations(id),
+  destination_path TEXT NOT NULL DEFAULT '',
   kind             TEXT NOT NULL,
   "order"          INTEGER NOT NULL,
   status           TEXT NOT NULL DEFAULT 'pending',
@@ -21,16 +21,12 @@ CREATE TABLE IF NOT EXISTS jobs (
   updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 
-CREATE TABLE IF NOT EXISTS destinations (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  path        TEXT NOT NULL,
-  kind        TEXT NOT NULL DEFAULT 'folder',
-  filesystem  TEXT NOT NULL DEFAULT 'unknown',
-  fs_override TEXT NOT NULL DEFAULT '',
-  bdm_prefix  TEXT NOT NULL DEFAULT '',
-  free_bytes  INTEGER NOT NULL DEFAULT 0,
-  updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-);
+-- NOTE: the destinations registry and id-keyed dest_locks lived here until
+-- the live-path migration (schema v5) removed them. They must NOT be
+-- recreated: re-running this file on a migrated database would resurrect
+-- legacy objects (and the old jobs index below), breaking subsequent
+-- Opens. Legacy databases carry those objects until
+-- migrateLiveDestinations drops them explicitly.
 
 -- Single-row-per-key executor state: paused flag, heartbeats.
 CREATE TABLE IF NOT EXISTS queue_state (
@@ -40,13 +36,12 @@ CREATE TABLE IF NOT EXISTS queue_state (
 );
 
 -- Cross-process destination locks: one row per held destination.
-CREATE TABLE IF NOT EXISTS dest_locks (
-  destination_id INTEGER PRIMARY KEY,
-  owner          TEXT NOT NULL,
-  updated_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-);
+-- (Created path-keyed by migrateLiveDestinations; see note above.)
 
 CREATE INDEX IF NOT EXISTS idx_jobs_status_order
   ON jobs(status, "order");
-CREATE INDEX IF NOT EXISTS idx_jobs_dest_status
-  ON jobs(destination_id, status);
+-- NOTE: the (destination_id, status) index lived here until the live-path
+-- migration (schema v5) dropped the column. It must NOT be recreated here:
+-- re-running this file on a migrated database would fail with "no such
+-- column: destination_id". Legacy databases carry the index until
+-- migrateLiveDestinations drops it explicitly.

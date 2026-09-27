@@ -34,7 +34,7 @@ type Executor struct {
 	stagingDir string // reserved for future spillover (see package doc)
 
 	mu      sync.Mutex
-	cancels map[int64]context.CancelFunc // destID -> running job cancel
+	cancels map[string]context.CancelFunc // dest path -> running job cancel
 }
 
 // New builds an Executor. disk performs all destination writes (real:
@@ -42,12 +42,23 @@ type Executor struct {
 func New(store *Store, lib *library.Store, disk transfer.Disk, stagingDir string) *Executor {
 	return &Executor{
 		store: store, lib: lib, disk: disk, stagingDir: stagingDir,
-		cancels: map[int64]context.CancelFunc{},
+		cancels: map[string]context.CancelFunc{},
 	}
 }
 
+// targetPaths delegates to LivePaths (live volumes, customized paths,
+// paths with live jobs).
+func (e *Executor) targetPaths() map[string]bool {
+	return LivePaths(e.store)
+}
+
+// resolveDestination delegates to ResolveDestination.
+func (e *Executor) resolveDestination(path string) (*Destination, error) {
+	return ResolveDestination(e.store, path)
+}
+
 // Run supervises one writer goroutine per destination until ctx ends,
-// rescanning for newly added destinations. A failed runner (e.g. lease
+// rescanning for newly relevant paths. A failed runner (e.g. lease
 // lost to another process) cools down 30s before respawn; shutdown waits
 // for all runners.
 func (e *Executor) Run(ctx context.Context) error {
@@ -55,52 +66,45 @@ func (e *Executor) Run(ctx context.Context) error {
 		cancel context.CancelFunc
 		done   chan error
 	}
-	runners := map[int64]*runner{}
-	cooled := map[int64]time.Time{}
-	spawn := func(id int64) {
+	runners := map[string]*runner{}
+	cooled := map[string]time.Time{}
+	spawn := func(path string) {
 		rctx, cancel := context.WithCancel(ctx)
 		r := &runner{cancel: cancel, done: make(chan error, 1)}
-		runners[id] = r
-		go func() { r.done <- e.RunDestination(rctx, id) }()
+		runners[path] = r
+		go func() { r.done <- e.RunDestination(rctx, path) }()
 	}
 	scan := func() {
-		dests, err := e.store.ListDestinations()
-		if err != nil {
-			return
-		}
-		for id, r := range runners {
+		targets := e.targetPaths()
+		for path, r := range runners {
 			select {
 			case err := <-r.done:
-				delete(runners, id)
+				delete(runners, path)
 				// Returns while the supervisor lives are real failures
 				// (lease/config), not shutdown: log (a silent crash loop
 				// here once hid a dead destination for weeks) and cool
 				// the destination.
 				if err != nil && ctx.Err() == nil {
-					slog.Error("destination runner failed", "destination_id", id, "error", err)
-					cooled[id] = time.Now()
+					slog.Error("destination runner failed", "destination_path", path, "error", err)
+					cooled[path] = time.Now()
 				}
 			default:
 			}
 		}
-		known := map[int64]bool{}
-		for _, d := range dests {
-			known[d.ID] = true
-		}
-		for id := range runners {
-			if !known[id] {
-				runners[id].cancel()
-				delete(runners, id)
+		for path := range runners {
+			if !targets[path] {
+				runners[path].cancel()
+				delete(runners, path)
 			}
 		}
-		for _, d := range dests {
-			if _, ok := runners[d.ID]; ok {
+		for path := range targets {
+			if _, ok := runners[path]; ok {
 				continue
 			}
-			if t, bad := cooled[d.ID]; bad && time.Since(t) < 30*time.Second {
+			if t, bad := cooled[path]; bad && time.Since(t) < 30*time.Second {
 				continue
 			}
-			spawn(d.ID)
+			spawn(path)
 		}
 	}
 	scan()
@@ -124,9 +128,9 @@ func (e *Executor) Run(ctx context.Context) error {
 
 // CancelDestination aborts the running job on a destination (partial output
 // deleted, job requeued). False when nothing runs there.
-func (e *Executor) CancelDestination(destID int64) bool {
+func (e *Executor) CancelDestination(destPath string) bool {
 	e.mu.Lock()
-	cancel, ok := e.cancels[destID]
+	cancel, ok := e.cancels[destPath]
 	e.mu.Unlock()
 	if !ok {
 		return false
@@ -136,14 +140,12 @@ func (e *Executor) CancelDestination(destID int64) bool {
 }
 
 // RunDestination holds the destination lease and drains its queue until ctx
-// ends: crash-recover, then claim → prepare-ahead → write → verify.
-func (e *Executor) RunDestination(ctx context.Context, destID int64) error {
-	dest, err := e.store.GetDestination(destID)
+// ends: resolve the live view, crash-recover, then claim → prepare-ahead →
+// write → verify.
+func (e *Executor) RunDestination(ctx context.Context, destPath string) error {
+	dest, err := e.resolveDestination(destPath)
 	if err != nil {
 		return err
-	}
-	if dest == nil {
-		return fmt.Errorf("no destination %d", destID)
 	}
 	// Park while the destination path is gone (unplugged stick): poll
 	// for reappearance instead of failing into the error cooldown, so a
@@ -153,14 +155,14 @@ func (e *Executor) RunDestination(ctx context.Context, destID int64) error {
 		return err
 	}
 	owner := ownerString()
-	if err := e.store.AcquireLock(destID, owner); err != nil {
+	if err := e.store.AcquireLock(dest.Path, owner); err != nil {
 		return err
 	}
-	defer e.store.ReleaseLock(destID, owner)
-	slog.Info("destination runner started", "destination_id", destID, "path", dest.Path)
-	defer slog.Info("destination runner stopped", "destination_id", destID)
+	defer e.store.ReleaseLock(dest.Path, owner)
+	slog.Info("destination runner started", "destination_path", dest.Path)
+	defer slog.Info("destination runner stopped", "destination_path", dest.Path)
 
-	if err := e.recover(destID); err != nil {
+	if err := e.recover(dest.Path); err != nil {
 		return err
 	}
 	if _, err := e.disk.SweepStaleTemps(dest.Path); err != nil {
@@ -171,7 +173,7 @@ func (e *Executor) RunDestination(ctx context.Context, destID int64) error {
 	defer beat.Stop()
 	go func() {
 		for range beat.C {
-			_ = e.store.Heartbeat(destID, owner)
+			_ = e.store.Heartbeat(dest.Path, owner)
 		}
 	}()
 
@@ -188,7 +190,7 @@ func (e *Executor) RunDestination(ctx context.Context, destID int64) error {
 			time.Sleep(pollInterval)
 			continue
 		}
-		job, ok, err := e.store.NextPending(destID)
+		job, ok, err := e.store.NextPending(dest.Path)
 		if err != nil {
 			return err
 		}
@@ -206,7 +208,7 @@ func (e *Executor) RunDestination(ctx context.Context, destID int64) error {
 			outcome = prepOutcome{work: w, err: err}
 		}
 		// Queue the next preparation while this job writes.
-		ahead = e.prepareAhead(ctx, destID, job.ID)
+		ahead = e.prepareAhead(ctx, dest.Path, job.ID)
 		if outcome.err != nil {
 			e.fail(job, outcome.err, false)
 			continue
@@ -227,7 +229,7 @@ func (e *Executor) waitForPath(ctx context.Context, dest *Destination) error {
 		return err
 	}
 	slog.Warn("destination path missing, parking runner until it reappears",
-		"destination_id", dest.ID, "path", dest.Path)
+		"destination_path", dest.Path)
 	t := time.NewTicker(10 * time.Second)
 	defer t.Stop()
 	for {
@@ -237,7 +239,7 @@ func (e *Executor) waitForPath(ctx context.Context, dest *Destination) error {
 		case <-t.C:
 			if _, err := os.Stat(dest.Path); err == nil {
 				slog.Info("destination path reappeared, resuming runner",
-					"destination_id", dest.ID, "path", dest.Path)
+					"destination_path", dest.Path)
 				return nil
 			} else if !os.IsNotExist(err) {
 				return err
@@ -248,14 +250,14 @@ func (e *Executor) waitForPath(ctx context.Context, dest *Destination) error {
 
 // recover resets crash-stuck running jobs to pending (re-run from scratch
 // after cleanup; see package doc).
-func (e *Executor) recover(destID int64) error {
+func (e *Executor) recover(destPath string) error {
 	jobs, err := e.store.ListJobs()
 	if err != nil {
 		return err
 	}
 	for _, j := range jobs {
-		if j.DestinationID == destID && j.Status == JobRunning {
-			slog.Warn("requeueing interrupted job", "job_id", j.ID, "destination_id", destID)
+		if j.DestinationPath == destPath && j.Status == JobRunning {
+			slog.Warn("requeueing interrupted job", "job_id", j.ID, "destination_path", destPath)
 			if err := e.store.RequeueJob(j.ID); err != nil {
 				return err
 			}
@@ -277,8 +279,8 @@ type prepOutcome struct {
 
 // prepareAhead peeks the next pending job (skipping the just-claimed one)
 // and prepares it in the background. Nil when the queue is dry.
-func (e *Executor) prepareAhead(ctx context.Context, destID, claimedID int64) *prepFuture {
-	peek, ok, err := e.store.PeekPending(destID)
+func (e *Executor) prepareAhead(ctx context.Context, destPath string, claimedID int64) *prepFuture {
+	peek, ok, err := e.store.PeekPending(destPath)
 	if err != nil || !ok || peek.ID == claimedID {
 		return nil
 	}
@@ -324,12 +326,9 @@ func (e *Executor) prepare(job *Job) (workItem, error) {
 	if item == nil {
 		return w, fmt.Errorf("job %d: library item %d gone", job.ID, job.LibraryItemID)
 	}
-	dest, err := e.store.GetDestination(job.DestinationID)
+	dest, err := e.resolveDestination(job.DestinationPath)
 	if err != nil {
 		return w, err
-	}
-	if dest == nil {
-		return w, fmt.Errorf("job %d: destination %d gone", job.ID, job.DestinationID)
 	}
 	w = workItem{job: job, item: item, dest: dest}
 	switch job.Kind {
@@ -380,11 +379,11 @@ func (e *Executor) fail(job *Job, err error, retryable bool) {
 func (e *Executor) executeJob(ctx context.Context, dest *Destination, job *Job, w workItem) {
 	jobCtx, cancel := context.WithCancel(ctx)
 	e.mu.Lock()
-	e.cancels[dest.ID] = cancel
+	e.cancels[dest.Path] = cancel
 	e.mu.Unlock()
 	defer func() {
 		e.mu.Lock()
-		delete(e.cancels, dest.ID)
+		delete(e.cancels, dest.Path)
 		e.mu.Unlock()
 		cancel()
 	}()

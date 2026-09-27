@@ -82,8 +82,8 @@ func prepareHarness(t *testing.T) (*apiHarness, context.CancelFunc, string, []li
 	} else if err := json.Unmarshal(raw, &dest); err != nil {
 		t.Fatal(err)
 	}
-	if code, _ := h.do("PATCH", fmt.Sprintf("/api/destinations/%d", dest.ID),
-		map[string]string{"filesystemOverride": "exfat"}); code != http.StatusOK {
+	if code, _ := h.do("PATCH", "/api/destinations",
+		map[string]string{"path": dest.Path, "filesystemOverride": "exfat"}); code != http.StatusOK {
 		t.Fatalf("override = %d", code)
 	}
 	var items []libraryItemJSON
@@ -108,14 +108,22 @@ func TestPreparePreview(t *testing.T) {
 	h, cancel, destDir, items := prepareHarness(t)
 	defer cancel()
 	var dests []destinationJSON
-	if code := h.get("/api/destinations", &dests); code != http.StatusOK || len(dests) != 1 {
-		t.Fatalf("dests = %+v", dests)
+	if code := h.get("/api/destinations", &dests); code != http.StatusOK {
+		t.Fatalf("dests = %d", code)
 	}
-	destID := dests[0].ID
+	destPath := ""
+	for _, d := range dests {
+		if d.Path == destDir {
+			destPath = d.Path
+		}
+	}
+	if destPath == "" {
+		t.Fatalf("own dest missing from %+v", dests)
+	}
 
 	var pv preparePreview
-	if code, raw := h.do("POST", fmt.Sprintf("/api/destinations/%d/prepare", destID),
-		map[string]any{"mode": "preview", "itemIds": idsOf(items)}); code != http.StatusOK {
+	if code, raw := h.do("POST", "/api/destinations/prepare",
+		map[string]any{"destinationPath": destPath, "mode": "preview", "itemIds": idsOf(items)}); code != http.StatusOK {
 		t.Fatalf("preview = %d\n%s", code, raw)
 	} else if err := json.Unmarshal(raw, &pv); err != nil {
 		t.Fatal(err)
@@ -136,8 +144,8 @@ func TestPreparePreview(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(destDir, "CD")); !os.IsNotExist(err) {
 		t.Error("preview created directories")
 	}
-	if code, _ := h.do("POST", fmt.Sprintf("/api/destinations/%d/prepare", destID),
-		map[string]any{"mode": "bogus"}); code != http.StatusBadRequest {
+	if code, _ := h.do("POST", "/api/destinations/prepare",
+		map[string]any{"destinationPath": destPath, "mode": "bogus"}); code != http.StatusBadRequest {
 		t.Fatalf("bad mode = %d, want 400", code)
 	}
 }
@@ -150,14 +158,22 @@ func TestPrepareExecuteWithLoader(t *testing.T) {
 	h.setRiptoplBase(t, fake.URL)
 
 	var dests []destinationJSON
-	if code := h.get("/api/destinations", &dests); code != http.StatusOK || len(dests) != 1 {
-		t.Fatalf("dests = %+v", dests)
+	if code := h.get("/api/destinations", &dests); code != http.StatusOK {
+		t.Fatalf("dests = %d", code)
 	}
-	destID := dests[0].ID
+	destPath := ""
+	for _, d := range dests {
+		if d.Path == destDir {
+			destPath = d.Path
+		}
+	}
+	if destPath == "" {
+		t.Fatalf("own dest missing from %+v", dests)
+	}
 
 	var res prepareResult
-	if code, raw := h.do("POST", fmt.Sprintf("/api/destinations/%d/prepare", destID),
-		map[string]any{"mode": "execute", "itemIds": idsOf(items), "riptoplTag": "current-fan-favorite"}); code != http.StatusOK {
+	if code, raw := h.do("POST", "/api/destinations/prepare",
+		map[string]any{"destinationPath": destPath, "mode": "execute", "itemIds": idsOf(items), "riptoplTag": "current-fan-favorite"}); code != http.StatusOK {
 		t.Fatalf("execute = %d\n%s", code, raw)
 	} else if err := json.Unmarshal(raw, &res); err != nil {
 		t.Fatal(err)
@@ -173,7 +189,7 @@ func TestPrepareExecuteWithLoader(t *testing.T) {
 		t.Errorf("staged ELF = %q, %v", back, err)
 	}
 	// Pinned version recorded in queue_state.
-	got, ok, err := h.qstore().GetState(fmt.Sprintf("loader.%d", destID))
+	got, ok, err := h.qstore().GetState(fmt.Sprintf("loader.%s", destPath))
 	if err != nil || !ok || !strings.Contains(got, digest) {
 		t.Errorf("loader record = %q,%v,%v", got, ok, err)
 	}
@@ -184,8 +200,8 @@ func TestPrepareExecuteWithLoader(t *testing.T) {
 		t.Error("checklist missing")
 	}
 	// Bad tag fails closed with 502 and stages nothing new.
-	if code, raw := h.do("POST", fmt.Sprintf("/api/destinations/%d/prepare", destID),
-		map[string]any{"mode": "execute", "itemIds": idsOf(items), "riptoplTag": "nope"}); code != http.StatusBadGateway {
+	if code, raw := h.do("POST", "/api/destinations/prepare",
+		map[string]any{"destinationPath": destPath, "mode": "execute", "itemIds": idsOf(items), "riptoplTag": "nope"}); code != http.StatusBadGateway {
 		t.Fatalf("bad tag = %d, want 502\n%s", code, raw)
 	}
 }
@@ -194,12 +210,21 @@ func TestPrepareExecuteNoLoader(t *testing.T) {
 	h, cancel, destDir, items := prepareHarness(t)
 	defer cancel()
 	var dests []destinationJSON
-	if code := h.get("/api/destinations", &dests); code != http.StatusOK || len(dests) != 1 {
-		t.Fatalf("dests = %+v", dests)
+	if code := h.get("/api/destinations", &dests); code != http.StatusOK {
+		t.Fatalf("dests = %d", code)
+	}
+	destPath := ""
+	for _, d := range dests {
+		if d.Path == destDir {
+			destPath = d.Path
+		}
+	}
+	if destPath == "" {
+		t.Fatalf("own dest missing from %+v", dests)
 	}
 	var res prepareResult
-	if code, raw := h.do("POST", fmt.Sprintf("/api/destinations/%d/prepare", dests[0].ID),
-		map[string]any{"mode": "execute", "itemIds": idsOf(items)}); code != http.StatusOK {
+	if code, raw := h.do("POST", "/api/destinations/prepare",
+		map[string]any{"destinationPath": destPath, "mode": "execute", "itemIds": idsOf(items)}); code != http.StatusOK {
 		t.Fatalf("execute = %d\n%s", code, raw)
 	} else if err := json.Unmarshal(raw, &res); err != nil {
 		t.Fatal(err)
@@ -214,8 +239,8 @@ func TestPrepareExecuteNoLoader(t *testing.T) {
 		t.Errorf("tree dirs not created: %v", err)
 	}
 	// Unknown item fails before anything writes.
-	if code, _ := h.do("POST", fmt.Sprintf("/api/destinations/%d/prepare", dests[0].ID),
-		map[string]any{"mode": "execute", "itemIds": []int64{9999}}); code != http.StatusNotFound {
+	if code, _ := h.do("POST", "/api/destinations/prepare",
+		map[string]any{"destinationPath": destPath, "mode": "execute", "itemIds": []int64{9999}}); code != http.StatusNotFound {
 		t.Fatalf("unknown item = %d, want 404", code)
 	}
 }

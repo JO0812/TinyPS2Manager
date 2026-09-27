@@ -213,12 +213,16 @@ func newHarness(t *testing.T, dbPath string) *harness {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { ls.Close() })
-	d, err := qs.AddDestination(Destination{Path: t.TempDir(), Kind: DestFolder,
-		Filesystem: "exfat"})
+	dir := t.TempDir()
+	if err := qs.UpsertSettings(DestinationSettings{Path: dir, Kind: DestFolder,
+		FSOverride: "exfat"}); err != nil {
+		t.Fatal(err)
+	}
+	d, err := ResolveDestination(qs, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &harness{qstore: qs, lib: ls, dest: d}
+	return &harness{qstore: qs, lib: ls, dest: *d}
 }
 
 func writeRandom(t *testing.T, path string, n int64) []byte {
@@ -313,9 +317,9 @@ func TestExecutorSequentialCopies(t *testing.T) {
 		ids = append(ids, it.ID)
 	}
 	if _, err := h.qstore.Enqueue([]Job{
-		{LibraryItemID: ids[0], DestinationID: h.dest.ID, Kind: KindCopy, BytesTotal: 1 << 20},
-		{LibraryItemID: ids[1], DestinationID: h.dest.ID, Kind: KindCopy, BytesTotal: 1 << 20},
-		{LibraryItemID: ids[2], DestinationID: h.dest.ID, Kind: KindCopy, BytesTotal: 1 << 20},
+		{LibraryItemID: ids[0], DestinationPath: h.dest.Path, Kind: KindCopy, BytesTotal: 1 << 20},
+		{LibraryItemID: ids[1], DestinationPath: h.dest.Path, Kind: KindCopy, BytesTotal: 1 << 20},
+		{LibraryItemID: ids[2], DestinationPath: h.dest.Path, Kind: KindCopy, BytesTotal: 1 << 20},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -359,8 +363,8 @@ func TestExecutorSecondExecutorRefused(t *testing.T) {
 	writeRandom(t, p, 1<<20)
 	it := addISOItem(t, h, p, "Game", library.DiscDVD)
 	if _, err := h.qstore.Enqueue([]Job{
-		{LibraryItemID: it.ID, DestinationID: h.dest.ID, Kind: KindCopy, BytesTotal: 1 << 20},
-		{LibraryItemID: it.ID, DestinationID: h.dest.ID, Kind: KindCopy, BytesTotal: 1 << 20},
+		{LibraryItemID: it.ID, DestinationPath: h.dest.Path, Kind: KindCopy, BytesTotal: 1 << 20},
+		{LibraryItemID: it.ID, DestinationPath: h.dest.Path, Kind: KindCopy, BytesTotal: 1 << 20},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -377,7 +381,7 @@ func TestExecutorSecondExecutorRefused(t *testing.T) {
 	exB := New(qs2, h.lib, fake, "")
 	ctxB, cancelB := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancelB()
-	if err := exB.RunDestination(ctxB, h.dest.ID); err == nil {
+	if err := exB.RunDestination(ctxB, h.dest.Path); err == nil {
 		t.Fatal("second executor: expected lock refusal")
 	} else if !strings.Contains(err.Error(), "held by") {
 		t.Fatalf("unexpected error: %v", err)
@@ -403,8 +407,8 @@ func TestExecutorErrorPausesAndCleans(t *testing.T) {
 	gi := addISOItem(t, h, filepath.Join(srcDir, "good.iso"), "Good", library.DiscDVD)
 	bi := addISOItem(t, h, filepath.Join(srcDir, "bad.iso"), "Bad", library.DiscDVD)
 	jobs, err := h.qstore.Enqueue([]Job{
-		{LibraryItemID: gi.ID, DestinationID: h.dest.ID, Kind: KindCopy, BytesTotal: 1 << 20},
-		{LibraryItemID: bi.ID, DestinationID: h.dest.ID, Kind: KindCopy, BytesTotal: 1 << 20},
+		{LibraryItemID: gi.ID, DestinationPath: h.dest.Path, Kind: KindCopy, BytesTotal: 1 << 20},
+		{LibraryItemID: bi.ID, DestinationPath: h.dest.Path, Kind: KindCopy, BytesTotal: 1 << 20},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -448,8 +452,8 @@ func TestExecutorCancelRequeues(t *testing.T) {
 	ai := addISOItem(t, h, filepath.Join(srcDir, "a.iso"), "A", library.DiscDVD)
 	bi := addISOItem(t, h, filepath.Join(srcDir, "b.iso"), "B", library.DiscDVD)
 	jobs, err := h.qstore.Enqueue([]Job{
-		{LibraryItemID: ai.ID, DestinationID: h.dest.ID, Kind: KindCopy, BytesTotal: 1 << 20},
-		{LibraryItemID: bi.ID, DestinationID: h.dest.ID, Kind: KindCopy, BytesTotal: 1 << 20},
+		{LibraryItemID: ai.ID, DestinationPath: h.dest.Path, Kind: KindCopy, BytesTotal: 1 << 20},
+		{LibraryItemID: bi.ID, DestinationPath: h.dest.Path, Kind: KindCopy, BytesTotal: 1 << 20},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -459,7 +463,7 @@ func TestExecutorCancelRequeues(t *testing.T) {
 	defer cancel()
 	go ex.Run(ctx)
 	waitJobStatus(t, h, jobs[0].ID, JobRunning, 15*time.Second)
-	if !ex.CancelDestination(h.dest.ID) {
+	if !ex.CancelDestination(h.dest.Path) {
 		t.Fatal("CancelDestination reported nothing running")
 	}
 	// The abort is proven by effects, not by catching the transient
@@ -475,7 +479,7 @@ func TestExecutorCancelRequeues(t *testing.T) {
 	if !aborted {
 		t.Errorf("no abort recorded for the cancelled write: %v", fake.aborts)
 	}
-	if ex.CancelDestination(9999) {
+	if ex.CancelDestination("/no/such/dest") {
 		t.Error("cancel on idle destination reported work")
 	}
 	waitJobs(t, h, JobDone, 15*time.Second)
@@ -522,8 +526,8 @@ func TestExecutorConvertGrouped(t *testing.T) {
 		ids = append(ids, it.ID)
 	}
 	if _, err := h.qstore.Enqueue([]Job{
-		{LibraryItemID: ids[0], DestinationID: h.dest.ID, Kind: KindConvertCopy},
-		{LibraryItemID: ids[1], DestinationID: h.dest.ID, Kind: KindConvertCopy},
+		{LibraryItemID: ids[0], DestinationPath: h.dest.Path, Kind: KindConvertCopy},
+		{LibraryItemID: ids[1], DestinationPath: h.dest.Path, Kind: KindConvertCopy},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -590,7 +594,7 @@ func TestExecutorSplit(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := h.qstore.Enqueue([]Job{
-		{LibraryItemID: it.ID, DestinationID: h.dest.ID, Kind: KindSplitAndCopy, BytesTotal: fi.Size()},
+		{LibraryItemID: it.ID, DestinationPath: h.dest.Path, Kind: KindSplitAndCopy, BytesTotal: fi.Size()},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -636,10 +640,8 @@ func TestExecutorRestartRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dest, err := qs.AddDestination(Destination{Path: t.TempDir(), Kind: DestFolder})
-	if err != nil {
-		t.Fatal(err)
-	}
+	destPath := t.TempDir()
+	dest := Destination{Path: destPath, Kind: DestFolder}
 	p := filepath.Join(t.TempDir(), "g.iso")
 	content := writeRandom(t, p, 1<<20)
 	it, err := ls.UpsertItem(library.LibraryItem{
@@ -654,13 +656,13 @@ func TestExecutorRestartRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	jobs, err := qs.Enqueue([]Job{
-		{LibraryItemID: it.ID, DestinationID: dest.ID, Kind: KindCopy, BytesTotal: 1 << 20},
+		{LibraryItemID: it.ID, DestinationPath: dest.Path, Kind: KindCopy, BytesTotal: 1 << 20},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Simulate the crash: claim the job (running, no executor), orphan a temp.
-	if _, ok, err := qs.NextPending(dest.ID); err != nil || !ok {
+	if _, ok, err := qs.NextPending(dest.Path); err != nil || !ok {
 		t.Fatalf("claim = %v, %v", ok, err)
 	}
 	stale := filepath.Join(dest.Path, "DVD", ".oplbm.deadbeef")
@@ -716,15 +718,14 @@ func TestRunDestinationParksOnMissingPath(t *testing.T) {
 	}
 	defer ls.Close()
 	missing := filepath.Join(t.TempDir(), "unplugged")
-	dest, err := qs.AddDestination(Destination{Path: missing, Kind: DestDrive})
-	if err != nil {
+	if err := qs.UpsertSettings(DestinationSettings{Path: missing, Kind: DestDrive}); err != nil {
 		t.Fatal(err)
 	}
 	ex := New(qs, ls, newFakeDisk(0), "")
 	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	err = ex.RunDestination(ctx, dest.ID)
+	err = ex.RunDestination(ctx, missing)
 	if err != context.DeadlineExceeded {
 		t.Fatalf("RunDestination = %v, want context deadline (parked, not crashed)", err)
 	}
@@ -747,7 +748,10 @@ func TestRunDestinationResumesOnReplug(t *testing.T) {
 	}
 	defer ls.Close()
 	missing := filepath.Join(t.TempDir(), "stick")
-	dest, err := qs.AddDestination(Destination{Path: missing, Kind: DestDrive})
+	if err := qs.UpsertSettings(DestinationSettings{Path: missing, Kind: DestDrive}); err != nil {
+		t.Fatal(err)
+	}
+	dest, err := ResolveDestination(qs, missing)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -765,7 +769,7 @@ func TestRunDestinationResumesOnReplug(t *testing.T) {
 		t.Fatal(err)
 	}
 	jobs, err := qs.Enqueue([]Job{
-		{LibraryItemID: it.ID, DestinationID: dest.ID, Kind: KindCopy, BytesTotal: 1 << 20},
+		{LibraryItemID: it.ID, DestinationPath: dest.Path, Kind: KindCopy, BytesTotal: 1 << 20},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -784,7 +788,7 @@ func TestRunDestinationResumesOnReplug(t *testing.T) {
 	if err := os.MkdirAll(missing, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	h := &harness{qstore: qs, lib: ls, dest: dest}
+	h := &harness{qstore: qs, lib: ls, dest: *dest}
 	waitJobStatus(t, h, jobs[0].ID, JobDone, 15*time.Second)
 	cancel()
 	<-runErr

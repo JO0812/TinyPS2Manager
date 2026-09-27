@@ -7,18 +7,14 @@ import (
 )
 
 func (s *Server) handlePreflight(w http.ResponseWriter, r *http.Request) {
-	id, err := pathID(r, "id")
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, "id", err.Error())
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		writeErr(w, http.StatusBadRequest, "path", "want a destination path")
 		return
 	}
-	dest, err := s.qstore.GetDestination(id)
+	dest, err := queue.ResolveDestination(s.qstore, path)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "", err.Error())
-		return
-	}
-	if dest == nil {
-		writeErr(w, http.StatusNotFound, "id", "no such destination")
 		return
 	}
 	res, err := queue.Preflight(dest)

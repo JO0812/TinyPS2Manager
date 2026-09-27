@@ -49,10 +49,10 @@ func New(qstore *queue.Store, lib *library.Store, settingsPath string, exec *que
 		r.Get("/destinations", s.handleDestinationsList)
 		r.Get("/destinations/volumes", s.handleVolumesList)
 		r.Post("/destinations", s.handleDestinationsCreate)
-		r.Patch("/destinations/{id}", s.handleDestinationsPatch)
-		r.Delete("/destinations/{id}", s.handleDestinationsDelete)
-		r.Post("/destinations/{id}/prepare", s.handlePrepare)
-		r.Get("/destinations/{id}/preflight", s.handlePreflight)
+		r.Patch("/destinations", s.handleDestinationsPatch)
+		r.Delete("/destinations", s.handleDestinationsDelete)
+		r.Post("/destinations/prepare", s.handlePrepare)
+		r.Get("/destinations/preflight", s.handlePreflight)
 		r.Post("/queue", s.handleQueueEnqueue)
 		r.Get("/queue", s.handleQueueList)
 		r.Patch("/queue/{jobId}", s.handleQueuePatch)
@@ -153,24 +153,24 @@ func toLibraryItemJSON(it library.LibraryItem) libraryItemJSON {
 }
 
 type jobJSON struct {
-	ID            int64  `json:"id"`
-	LibraryItemID int64  `json:"libraryItemId"`
-	DestinationID int64  `json:"destinationId"`
-	Kind          string `json:"kind"`
-	Order         int    `json:"order"`
-	Status        string `json:"status"`
-	Phase         string `json:"phase"`
-	BytesTotal    int64  `json:"bytesTotal"`
-	BytesDone     int64  `json:"bytesDone"`
-	Error         string `json:"error"`
-	Attempts      int    `json:"attempts"`
-	CreatedAt     string `json:"createdAt"`
-	UpdatedAt     string `json:"updatedAt"`
+	ID              int64  `json:"id"`
+	LibraryItemID   int64  `json:"libraryItemId"`
+	DestinationPath string `json:"destinationPath"`
+	Kind            string `json:"kind"`
+	Order           int    `json:"order"`
+	Status          string `json:"status"`
+	Phase           string `json:"phase"`
+	BytesTotal      int64  `json:"bytesTotal"`
+	BytesDone       int64  `json:"bytesDone"`
+	Error           string `json:"error"`
+	Attempts        int    `json:"attempts"`
+	CreatedAt       string `json:"createdAt"`
+	UpdatedAt       string `json:"updatedAt"`
 }
 
 func toJobJSON(j queue.Job) jobJSON {
 	return jobJSON{
-		ID: j.ID, LibraryItemID: j.LibraryItemID, DestinationID: j.DestinationID,
+		ID: j.ID, LibraryItemID: j.LibraryItemID, DestinationPath: j.DestinationPath,
 		Kind: string(j.Kind), Order: j.Order, Status: string(j.Status),
 		Phase: j.Phase, BytesTotal: j.BytesTotal, BytesDone: j.BytesDone,
 		Error: j.Error, Attempts: j.Attempts, CreatedAt: j.CreatedAt, UpdatedAt: j.UpdatedAt,
@@ -178,8 +178,8 @@ func toJobJSON(j queue.Job) jobJSON {
 }
 
 type destinationJSON struct {
-	ID         int64  `json:"id"`
 	Path       string `json:"path"`
+	Label      string `json:"label"`
 	Kind       string `json:"kind"`
 	Filesystem string `json:"filesystem"`
 	FSOverride string `json:"fsOverride"`
@@ -187,6 +187,7 @@ type destinationJSON struct {
 	FreeBytes  int64  `json:"freeBytes"`
 	TotalBytes int64  `json:"totalBytes"`
 	Reachable  bool   `json:"reachable"`
+	Customized bool   `json:"customized"`
 	UpdatedAt  string `json:"updatedAt"`
 }
 
@@ -201,9 +202,9 @@ func reachable(path string) bool {
 
 func toDestinationJSON(d queue.Destination) destinationJSON {
 	return destinationJSON{
-		ID: d.ID, Path: d.Path, Kind: string(d.Kind), Filesystem: d.Filesystem,
+		Path: d.Path, Label: d.Label, Kind: string(d.Kind), Filesystem: d.Filesystem,
 		FSOverride: d.FSOverride, BDMPrefix: d.BDMPrefix,
 		FreeBytes: d.FreeBytes, TotalBytes: d.TotalBytes,
-		Reachable: reachable(d.Path), UpdatedAt: d.UpdatedAt,
+		Reachable: reachable(d.Path), Customized: d.Customized, UpdatedAt: d.UpdatedAt,
 	}
 }

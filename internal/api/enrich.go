@@ -18,7 +18,7 @@ import (
 )
 
 // handleEnrich dispatches POST /api/enrich/{kind} where kind is art, cheats, or riptopl.
-// Body: {destinationId: int, itemIds?: []int, tag?: string, confirmUncertain?: bool}
+// Body: {destinationPath: string, itemIds?: []int, tag?: string, confirmUncertain?: bool}
 func (s *Server) handleEnrich(w http.ResponseWriter, r *http.Request) {
 	kind := chi.URLParam(r, "kind")
 	switch kind {
@@ -28,7 +28,7 @@ func (s *Server) handleEnrich(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		DestinationID    int64   `json:"destinationId"`
+		DestinationPath  string  `json:"destinationPath"`
 		ItemIDs          []int64 `json:"itemIds"`
 		Tag              string  `json:"tag"`
 		ConfirmUncertain bool    `json:"confirmUncertain"`
@@ -38,17 +38,13 @@ func (s *Server) handleEnrich(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "body", err.Error())
 		return
 	}
-	if body.DestinationID == 0 {
-		writeErr(w, http.StatusBadRequest, "destinationId", "want a positive id")
+	if body.DestinationPath == "" {
+		writeErr(w, http.StatusBadRequest, "destinationPath", "want a destination path")
 		return
 	}
-	dest, err := s.qstore.GetDestination(body.DestinationID)
+	dest, err := queue.ResolveDestination(s.qstore, body.DestinationPath)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "", err.Error())
-		return
-	}
-	if dest == nil {
-		writeErr(w, http.StatusNotFound, "destinationId", "no such destination")
 		return
 	}
 	switch kind {
@@ -246,7 +242,7 @@ func (s *Server) enrichRiptopl(w http.ResponseWriter, r *http.Request, dest *que
 	}
 	// Record pinned version
 	raw, _ := json.Marshal(map[string]any{"tag": rel.Tag, "asset": rel.AssetName, "digest": rel.Digest, "flavour": st.Flavour})
-	_ = s.qstore.SetState(fmt.Sprintf("loader.%d", dest.ID), string(raw))
+	_ = s.qstore.SetState(fmt.Sprintf("loader.%s", dest.Path), string(raw))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"tag": rel.Tag, "asset": rel.AssetName, "url": rel.AssetURL, "digest": rel.Digest,
 		"flavour": st.Flavour, "elfPath": st.ELFPath,

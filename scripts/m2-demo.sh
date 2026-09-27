@@ -19,7 +19,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "== build + fixtures =="
-go build -o "$BIN" ./cmd/oplbm
+go build -o "$BIN" .
 go run ./testdata/gensrc --out "$FIX"
 
 echo "== serve =="

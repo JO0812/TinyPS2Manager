@@ -15,18 +15,18 @@ import (
 func cmdArt(args []string) error {
 	fs := flag.NewFlagSet("art", flag.ContinueOnError)
 	dbPath := fs.String("db", "", "SQLite path (default $CONFIG/oplbm/oplbm.db)")
-	var deviceID int64
+	var devicePath string
 	var missingOnly bool
-	fs.Int64Var(&deviceID, "device", 0, "destination id")
+	fs.StringVar(&devicePath, "device", "", "destination path")
 	fs.BoolVar(&missingOnly, "missing-only", false, "only fetch missing art")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: oplbm art --device <id> [--missing-only] [--db path]\n")
+		fmt.Fprintf(os.Stderr, "Usage: oplbm art --device <path> [--missing-only] [--db path]\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if deviceID == 0 {
+	if devicePath == "" {
 		fs.Usage()
 		return fmt.Errorf("--device is required")
 	}
@@ -44,12 +44,12 @@ func cmdArt(args []string) error {
 		return err
 	}
 	defer lib.Close()
-	dest, err := qstore.GetDestination(deviceID)
+	dest, err := queue.ResolveDestination(qstore, devicePath)
 	if err != nil {
 		return err
 	}
 	if dest == nil {
-		return fmt.Errorf("no destination %d", deviceID)
+		return fmt.Errorf("no destination %q", devicePath)
 	}
 	items, err := lib.List()
 	if err != nil {

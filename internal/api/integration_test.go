@@ -155,13 +155,18 @@ func TestIntegrationEndToEnd(t *testing.T) {
 	} else if err := json.Unmarshal(raw, &dest); err != nil {
 		t.Fatal(err)
 	}
-	if code, _ := h.do("PATCH", fmt.Sprintf("/api/destinations/%d", dest.ID),
-		map[string]string{"filesystemOverride": "exfat", "bdmPrefix": ""}); code != http.StatusOK {
+	if code, _ := h.do("PATCH", "/api/destinations",
+		map[string]string{"path": dest.Path, "filesystemOverride": "exfat", "bdmPrefix": ""}); code != http.StatusOK {
 		t.Fatalf("patch dest = %d", code)
 	}
-	if code, _ := h.do("PATCH", "/api/destinations/9999",
-		map[string]string{"bdmPrefix": "X"}); code != http.StatusNotFound {
-		t.Fatalf("missing dest = %d, want 404", code)
+	// PATCH on an unknown path upserts customization (live model: no
+	// registry to miss).
+	if code, _ := h.do("PATCH", "/api/destinations",
+		map[string]string{"path": "/nonexistent-xyz", "bdmPrefix": "X"}); code != http.StatusOK {
+		t.Fatalf("upsert patch = %d, want 200", code)
+	}
+	if st, _ := h.qstore().GetSettings("/nonexistent-xyz"); st == nil || st.BDMPrefix != "X" {
+		t.Fatalf("upserted settings = %+v", st)
 	}
 
 	// Import + library reads.
@@ -198,7 +203,7 @@ func TestIntegrationEndToEnd(t *testing.T) {
 	// Enqueue copy + convert; reorder before the executor drains.
 	var jobs []jobJSON
 	if code, raw := h.do("POST", "/api/queue", map[string]any{
-		"destinationId": dest.ID, "itemIds": []int64{iso.ID, cue.ID},
+		"destinationPath": dest.Path, "itemIds": []int64{iso.ID, cue.ID},
 	}); code != http.StatusCreated {
 		t.Fatalf("enqueue = %d\n%s", code, raw)
 	} else if err := json.Unmarshal(raw, &jobs); err != nil {
@@ -253,7 +258,7 @@ func TestIntegrationEndToEnd(t *testing.T) {
 	}
 	var extra []jobJSON
 	if code, raw := h.do("POST", "/api/queue", map[string]any{
-		"destinationId": dest.ID, "itemIds": []int64{iso.ID},
+		"destinationPath": dest.Path, "itemIds": []int64{iso.ID},
 	}); code != http.StatusCreated {
 		t.Fatalf("enqueue2 = %d\n%s", code, raw)
 	} else if err := json.Unmarshal(raw, &extra); err != nil {
@@ -326,12 +331,12 @@ func TestIntegrationEnqueueValidation(t *testing.T) {
 		}
 	}
 	if code, raw := h.do("POST", "/api/queue", map[string]any{
-		"destinationId": dest.ID, "itemIds": first,
+		"destinationPath": dest.Path, "itemIds": first,
 	}); code != http.StatusUnprocessableEntity {
 		t.Fatalf("unknown fs = %d, want 422\n%s", code, raw)
 	}
-	if code, _ := h.do("PATCH", fmt.Sprintf("/api/destinations/%d", dest.ID),
-		map[string]string{"filesystemOverride": "fat32"}); code != http.StatusOK {
+	if code, _ := h.do("PATCH", "/api/destinations",
+		map[string]string{"path": dest.Path, "filesystemOverride": "fat32"}); code != http.StatusOK {
 		t.Fatalf("override = %d", code)
 	}
 	// 5-disc group: N4 manifest rule fires before any write.
@@ -345,7 +350,7 @@ func TestIntegrationEnqueueValidation(t *testing.T) {
 		t.Fatalf("want 5 Epic items, got %d", len(five))
 	}
 	if code, raw := h.do("POST", "/api/queue", map[string]any{
-		"destinationId": dest.ID, "itemIds": five,
+		"destinationPath": dest.Path, "itemIds": five,
 	}); code != http.StatusUnprocessableEntity {
 		t.Fatalf("5-disc = %d, want 422\n%s", code, raw)
 	} else if !strings.Contains(string(raw), "4") {
@@ -353,12 +358,12 @@ func TestIntegrationEnqueueValidation(t *testing.T) {
 	}
 	// Unknown item and empty list.
 	if code, _ := h.do("POST", "/api/queue", map[string]any{
-		"destinationId": dest.ID, "itemIds": []int64{9999},
+		"destinationPath": dest.Path, "itemIds": []int64{9999},
 	}); code != http.StatusNotFound {
 		t.Fatalf("unknown item = %d, want 404", code)
 	}
 	if code, _ := h.do("POST", "/api/queue", map[string]any{
-		"destinationId": dest.ID, "itemIds": []int64{},
+		"destinationPath": dest.Path, "itemIds": []int64{},
 	}); code != http.StatusBadRequest {
 		t.Fatalf("empty items = %d, want 400", code)
 	}
@@ -379,8 +384,8 @@ func TestIntegrationEnqueueSplitKind(t *testing.T) {
 	} else if err := json.Unmarshal(raw, &dest); err != nil {
 		t.Fatal(err)
 	}
-	if code, _ := h.do("PATCH", fmt.Sprintf("/api/destinations/%d", dest.ID),
-		map[string]string{"filesystemOverride": "fat32"}); code != http.StatusOK {
+	if code, _ := h.do("PATCH", "/api/destinations",
+		map[string]string{"path": dest.Path, "filesystemOverride": "fat32"}); code != http.StatusOK {
 		t.Fatalf("override = %d", code)
 	}
 	var items []libraryItemJSON
@@ -398,7 +403,7 @@ func TestIntegrationEnqueueSplitKind(t *testing.T) {
 	}
 	var jobs []jobJSON
 	if code, raw := h.do("POST", "/api/queue", map[string]any{
-		"destinationId": dest.ID, "itemIds": []int64{items[0].ID},
+		"destinationPath": dest.Path, "itemIds": []int64{items[0].ID},
 	}); code != http.StatusCreated {
 		t.Fatalf("enqueue = %d\n%s", code, raw)
 	} else if err := json.Unmarshal(raw, &jobs); err != nil {
@@ -521,7 +526,7 @@ func TestIntegrationDestinationsReachable(t *testing.T) {
 	}
 	// Bypass create-time validation to track a dead (unplugged) path.
 	dead := filepath.Join(t.TempDir(), "unplugged")
-	if _, err := h.qstore().AddDestination(queue.Destination{Path: dead, Kind: queue.DestDrive}); err != nil {
+	if err := h.qstore().UpsertSettings(queue.DestinationSettings{Path: dead, Kind: queue.DestDrive}); err != nil {
 		t.Fatal(err)
 	}
 	var dests []destinationJSON
@@ -539,7 +544,7 @@ func TestIntegrationDestinationsReachable(t *testing.T) {
 		t.Errorf("dead dest reachable = %+v, want false", got)
 	}
 	// DELETE removes an unused destination…
-	if code, _ := h.do("DELETE", fmt.Sprintf("/api/destinations/%d", created.ID), nil); code != http.StatusOK {
+	if code, _ := h.do("DELETE", "/api/destinations", map[string]string{"path": created.Path}); code != http.StatusOK {
 		t.Fatalf("delete = %d", code)
 	}
 	if code := h.get("/api/destinations", &dests); code != http.StatusOK {
@@ -551,7 +556,7 @@ func TestIntegrationDestinationsReachable(t *testing.T) {
 		}
 	}
 	// …404s on unknown ids…
-	if code, _ := h.do("DELETE", "/api/destinations/9999", nil); code != http.StatusNotFound {
+	if code, _ := h.do("DELETE", "/api/destinations", map[string]string{"path": "/nonexistent-xyz"}); code != http.StatusNotFound {
 		t.Fatalf("delete missing = %d, want 404", code)
 	}
 	// …and 409s while jobs reference the destination.
@@ -562,11 +567,11 @@ func TestIntegrationDestinationsReachable(t *testing.T) {
 	} else if err := json.Unmarshal(raw, &withJobs); err != nil {
 		t.Fatal(err)
 	}
-	jobs, err := h.qstore().Enqueue([]queue.Job{{LibraryItemID: 1, DestinationID: withJobs.ID, Kind: queue.KindCopy}})
+	jobs, err := h.qstore().Enqueue([]queue.Job{{LibraryItemID: 1, DestinationPath: withJobs.Path, Kind: queue.KindCopy}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code, _ := h.do("DELETE", fmt.Sprintf("/api/destinations/%d", withJobs.ID), nil); code != http.StatusConflict {
+	if code, _ := h.do("DELETE", "/api/destinations", map[string]string{"path": withJobs.Path}); code != http.StatusConflict {
 		t.Fatalf("delete with jobs = %d, want 409", code)
 	}
 	for _, j := range jobs {
@@ -574,7 +579,7 @@ func TestIntegrationDestinationsReachable(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if code, _ := h.do("DELETE", fmt.Sprintf("/api/destinations/%d", withJobs.ID), nil); code != http.StatusOK {
+	if code, _ := h.do("DELETE", "/api/destinations", map[string]string{"path": withJobs.Path}); code != http.StatusOK {
 		t.Fatalf("delete after cancel = %d, want 200", code)
 	}
 }
@@ -592,8 +597,8 @@ func TestIntegrationSSE(t *testing.T) {
 	} else if err := json.Unmarshal(raw, &dest); err != nil {
 		t.Fatal(err)
 	}
-	if code, _ := h.do("PATCH", fmt.Sprintf("/api/destinations/%d", dest.ID),
-		map[string]string{"filesystemOverride": "exfat"}); code != http.StatusOK {
+	if code, _ := h.do("PATCH", "/api/destinations",
+		map[string]string{"path": dest.Path, "filesystemOverride": "exfat"}); code != http.StatusOK {
 		t.Fatalf("override = %d", code)
 	}
 	var items []libraryItemJSON
@@ -614,7 +619,7 @@ func TestIntegrationSSE(t *testing.T) {
 		}
 	}
 	if code, _ := h.do("POST", "/api/queue", map[string]any{
-		"destinationId": dest.ID, "itemIds": []int64{isoID},
+		"destinationPath": dest.Path, "itemIds": []int64{isoID},
 	}); code != http.StatusCreated {
 		t.Fatalf("enqueue = %d", code)
 	}

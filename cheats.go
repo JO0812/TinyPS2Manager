@@ -17,18 +17,18 @@ import (
 func cmdCheats(args []string) error {
 	fs := flag.NewFlagSet("cheats", flag.ContinueOnError)
 	dbPath := fs.String("db", "", "SQLite path (default $CONFIG/oplbm/oplbm.db)")
-	var deviceID int64
+	var devicePath string
 	var confirm bool
-	fs.Int64Var(&deviceID, "device", 0, "destination id")
+	fs.StringVar(&devicePath, "device", "", "destination path")
 	fs.BoolVar(&confirm, "confirm-uncertain", false, "confirm uncertain GameIDs")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: oplbm cheats --device <id> [--confirm-uncertain] [--db path]\n")
+		fmt.Fprintf(os.Stderr, "Usage: oplbm cheats --device <path> [--confirm-uncertain] [--db path]\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if deviceID == 0 {
+	if devicePath == "" {
 		fs.Usage()
 		return fmt.Errorf("--device is required")
 	}
@@ -46,12 +46,12 @@ func cmdCheats(args []string) error {
 		return err
 	}
 	defer lib.Close()
-	dest, err := qstore.GetDestination(deviceID)
+	dest, err := queue.ResolveDestination(qstore, devicePath)
 	if err != nil {
 		return err
 	}
 	if dest == nil {
-		return fmt.Errorf("no destination %d", deviceID)
+		return fmt.Errorf("no destination %q", devicePath)
 	}
 	items, err := lib.List()
 	if err != nil {

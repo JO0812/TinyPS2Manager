@@ -9,9 +9,7 @@ import (
 )
 
 func TestPreflightFolder(t *testing.T) {
-	qs, _ := Open(":memory:")
-	defer qs.Close()
-	dest, _ := qs.AddDestination(Destination{Path: t.TempDir(), Kind: DestFolder, Filesystem: "exfat"})
+	dest := Destination{Path: t.TempDir(), Kind: DestFolder, Filesystem: "exfat"}
 	// Need to set filesystem to match detected or unknown? For folder, we test with
 	// filesystem matching detected or warn. Use actual probe: temp dir is likely overlay/tmpfs,
 	// so effective exfat will mismatch and cause fail — we want pass, so set to unknown.
@@ -40,10 +38,8 @@ func TestPreflightFolder(t *testing.T) {
 }
 
 func TestPreflightFilesystemMismatch(t *testing.T) {
-	qs, _ := Open(":memory:")
-	defer qs.Close()
 	dir := t.TempDir()
-	dest, _ := qs.AddDestination(Destination{Path: dir, Kind: DestFolder, Filesystem: "unknown", FSOverride: "fat32"})
+	dest := Destination{Path: dir, Kind: DestFolder, Filesystem: "unknown", FSOverride: "fat32"}
 	// Actual probe on temp dir will be overlay/tmpfs, not fat32, so mismatch should fail
 	res, err := Preflight(&dest)
 	if err != nil {
@@ -64,10 +60,8 @@ func TestPreflightFilesystemMismatch(t *testing.T) {
 }
 
 func TestPreflightULCfg(t *testing.T) {
-	qs, _ := Open(":memory:")
-	defer qs.Close()
 	base := t.TempDir()
-	dest, _ := qs.AddDestination(Destination{Path: base, Kind: DestFolder, Filesystem: "unknown"})
+	dest := Destination{Path: base, Kind: DestFolder, Filesystem: "unknown"}
 	// No ul sets -> pass
 	res, err := Preflight(&dest)
 	if err != nil {
@@ -150,9 +144,7 @@ func TestSpinWarn(t *testing.T) {
 
 func TestPreflightFragmentation(t *testing.T) {
 	base := t.TempDir()
-	qs, _ := Open(":memory:")
-	defer qs.Close()
-	dest, _ := qs.AddDestination(Destination{Path: base, Kind: DestFolder, Filesystem: "unknown"})
+	dest := Destination{Path: base, Kind: DestFolder, Filesystem: "unknown"}
 	// Create >100 files
 	for i := 0; i < 250; i++ {
 		_ = os.WriteFile(filepath.Join(base, "fragfile"+string(rune(48+i%10))+"_"+string(rune(65+i%26))+string(rune(i))), []byte("x"), 0o644)

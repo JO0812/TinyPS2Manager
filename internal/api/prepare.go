@@ -22,11 +22,12 @@ func (s *Server) riptoplClient() *riptopl.Client {
 }
 
 type prepareRequest struct {
-	Mode       string  `json:"mode"` // preview | execute
-	ItemIDs    []int64 `json:"itemIds"`
-	RiptoplTag string  `json:"riptoplTag"` // "" = skip the loader
-	Flavour    string  `json:"flavour"`    // "" = preference order
-	Kind       *string `json:"kind"`       // optional: "copy-ps1-ember" for PS1 Ember preview
+	DestinationPath string  `json:"destinationPath"`
+	Mode            string  `json:"mode"` // preview | execute
+	ItemIDs         []int64 `json:"itemIds"`
+	RiptoplTag      string  `json:"riptoplTag"` // "" = skip the loader
+	Flavour         string  `json:"flavour"`    // "" = preference order
+	Kind            *string `json:"kind"`       // optional: "copy-ps1-ember" for PS1 Ember preview
 }
 
 type riptoplPreview struct {
@@ -65,31 +66,26 @@ type prepareResult struct {
 }
 
 func (s *Server) handlePrepare(w http.ResponseWriter, r *http.Request) {
-	id, err := pathID(r, "id")
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, "id", err.Error())
-		return
-	}
 	var body prepareRequest
 	if err := decodeStrict(r, &body); err != nil {
 		writeErr(w, http.StatusBadRequest, "body", err.Error())
+		return
+	}
+	if body.DestinationPath == "" {
+		writeErr(w, http.StatusBadRequest, "destinationPath", "want a destination path")
 		return
 	}
 	if body.Mode != "preview" && body.Mode != "execute" {
 		writeErr(w, http.StatusBadRequest, "mode", "want \"preview\" or \"execute\"")
 		return
 	}
-	dest, err := s.qstore.GetDestination(id)
+	dest, err := queue.ResolveDestination(s.qstore, body.DestinationPath)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "", err.Error())
 		return
 	}
-	if dest == nil {
-		writeErr(w, http.StatusNotFound, "id", "no such destination")
-		return
-	}
 	if fi, err := os.Stat(dest.Path); err != nil || !fi.IsDir() {
-		writeErr(w, http.StatusUnprocessableEntity, "id", "destination path is gone")
+		writeErr(w, http.StatusUnprocessableEntity, "destinationPath", "destination path is gone")
 		return
 	}
 
@@ -272,7 +268,7 @@ func (s *Server) executePrepare(ctx context.Context, dest *queue.Destination, bo
 		res.Riptopl = staged
 	}
 
-	jobs, apiErr := s.enqueueItems(dest.ID, body.ItemIDs, forced)
+	jobs, apiErr := s.enqueueItems(dest.Path, body.ItemIDs, forced)
 	if apiErr != nil {
 		return fail(apiErr.status, apiErr.field, apiErr.msg)
 	}
@@ -315,7 +311,7 @@ func (s *Server) stageLoader(ctx context.Context, dest *queue.Destination, body 
 		StagedAt: time.Now().UTC().Format(time.RFC3339),
 	}
 	raw, _ := json.Marshal(rec)
-	if err := s.qstore.SetState(fmt.Sprintf("loader.%d", dest.ID), string(raw)); err != nil {
+	if err := s.qstore.SetState(fmt.Sprintf("loader.%s", dest.Path), string(raw)); err != nil {
 		return nil, &apiError{status: http.StatusInternalServerError, field: "", msg: err.Error()}
 	}
 	// Re-run the tree preview so the response lists the staged ELF too.

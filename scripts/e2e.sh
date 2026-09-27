@@ -37,7 +37,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-go build -o "$BIN" ./cmd/oplbm
+go build -o "$BIN" .
 go run ./testdata/gensrc --out "$FIX" >/dev/null
 "$BIN" serve --bind "127.0.0.1:$PORT" --db "$DB" --settings "$SET" >/dev/null 2>&1 &
 SERVE=$!

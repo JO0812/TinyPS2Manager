@@ -87,12 +87,120 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := migrateLiveDestinations(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return &Store{db: db}, nil
+}
+
+// hasTable reports whether a table exists (migrations must tolerate both
+// fresh and legacy databases).
+func hasTable(db *sql.DB, table string) bool {
+	var name string
+	err := db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&name)
+	return err == nil && name == table
+}
+
+// hasColumn reports whether a table has a column.
+func hasColumn(db *sql.DB, table, column string) bool {
+	rows, err := db.Query(fmt.Sprintf(`PRAGMA table_info(%s)`, table))
+	if err != nil {
+		return false
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return false
+		}
+		if name == column {
+			return true
+		}
+	}
+	return false
+}
+
+// migrateLiveDestinations moves the destination registry to live,
+// path-keyed settings (schema v5): per-path user settings replace the
+// destinations table, and jobs reference destination_path instead of a
+// numeric id. Legacy rows are backfilled (settings keep kind/prefix/
+// override; jobs resolve their path through the old table) before the old
+// objects are dropped. Locks are ephemeral — the lock table is rebuilt
+// empty only while its schema still uses ids.
+func migrateLiveDestinations(db *sql.DB) error {
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS destination_settings (
+		path        TEXT PRIMARY KEY,
+		kind        TEXT NOT NULL DEFAULT 'folder',
+		fs_override TEXT NOT NULL DEFAULT '',
+		bdm_prefix  TEXT NOT NULL DEFAULT '',
+		updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+	)`); err != nil {
+		return fmt.Errorf("create destination_settings: %w", err)
+	}
+	if hasTable(db, "destinations") {
+		if _, err := db.Exec(`INSERT OR IGNORE INTO destination_settings(path, kind, fs_override, bdm_prefix)
+			SELECT path, kind, fs_override, bdm_prefix FROM destinations`); err != nil {
+			return fmt.Errorf("backfill settings: %w", err)
+		}
+		if !hasColumn(db, "jobs", "destination_path") {
+			if _, err := db.Exec(`ALTER TABLE jobs ADD COLUMN destination_path TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("add destination_path: %w", err)
+			}
+		}
+		if _, err := db.Exec(`UPDATE jobs SET destination_path = COALESCE(
+			(SELECT path FROM destinations WHERE destinations.id = jobs.destination_id), '')
+			WHERE destination_path = ''`); err != nil {
+			return fmt.Errorf("backfill job paths: %w", err)
+		}
+		if _, err := db.Exec(`DROP TABLE IF EXISTS destinations`); err != nil {
+			return fmt.Errorf("drop destinations: %w", err)
+		}
+	} else if !hasColumn(db, "jobs", "destination_path") {
+		if _, err := db.Exec(`ALTER TABLE jobs ADD COLUMN destination_path TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add destination_path: %w", err)
+		}
+	}
+	if hasColumn(db, "jobs", "destination_id") {
+		if _, err := db.Exec(`DROP INDEX IF EXISTS idx_jobs_dest_status`); err != nil {
+			return fmt.Errorf("drop old jobs index: %w", err)
+		}
+		if _, err := db.Exec(`ALTER TABLE jobs DROP COLUMN destination_id`); err != nil {
+			return fmt.Errorf("drop destination_id: %w", err)
+		}
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_jobs_dest_path
+		ON jobs(destination_path, status)`); err != nil {
+		return fmt.Errorf("index job paths: %w", err)
+	}
+	if hasTable(db, "dest_locks") && !hasColumn(db, "dest_locks", "destination_path") {
+		if _, err := db.Exec(`DROP TABLE dest_locks`); err != nil {
+			return fmt.Errorf("drop id-keyed locks: %w", err)
+		}
+	}
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS dest_locks (
+		destination_path TEXT PRIMARY KEY,
+		owner            TEXT NOT NULL,
+		updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+	)`); err != nil {
+		return fmt.Errorf("create path-keyed locks: %w", err)
+	}
+	if _, err := db.Exec(`INSERT OR IGNORE INTO schema_version(version) VALUES (5)`); err != nil {
+		return fmt.Errorf("record schema version: %w", err)
+	}
+	return nil
 }
 
 // migrateCapacity adds destinations.total_bytes (schema v3). SQLite has no
 // idempotent ADD COLUMN, so the PRAGMA guard keeps Open re-runnable.
+// Post-v5 the destinations table is gone (live settings); skip then.
 func migrateCapacity(db *sql.DB) error {
+	if !hasTable(db, "destinations") {
+		return nil
+	}
 	rows, err := db.Query(`PRAGMA table_info(destinations)`)
 	if err != nil {
 		return fmt.Errorf("inspect destinations: %w", err)
@@ -125,125 +233,103 @@ func migrateCapacity(db *sql.DB) error {
 // Close releases the database.
 func (s *Store) Close() error { return s.db.Close() }
 
-// --- Destinations ---
+// --- Destination settings (live model) ---
+//
+// Destinations are live: drives come from volume detection, folders from
+// their paths. What persists per path is user customization only (kind,
+// prefix, override). Jobs reference destination_path directly, so nothing
+// breaks when a drive is unplugged and replugged.
 
-// AddDestination inserts a target and returns it with its ID.
-func (s *Store) AddDestination(d Destination) (Destination, error) {
-	if d.Path == "" {
-		return Destination{}, fmt.Errorf("destination path is empty")
+// UpsertSettings records per-path customization, creating the row.
+func (s *Store) UpsertSettings(st DestinationSettings) error {
+	if st.Path == "" {
+		return fmt.Errorf("destination path is empty")
 	}
-	if d.Kind != DestDrive && d.Kind != DestFolder {
-		return Destination{}, fmt.Errorf("bad destination kind %q", d.Kind)
+	kind := st.Kind
+	if kind == "" {
+		kind = DestFolder
 	}
-	res, err := s.db.Exec(`INSERT INTO destinations
-		(path, kind, filesystem, fs_override, bdm_prefix, free_bytes, total_bytes)
-		VALUES (?,?,?,?,?,?,?)`,
-		d.Path, string(d.Kind), d.Filesystem, d.FSOverride, d.BDMPrefix, d.FreeBytes, d.TotalBytes)
-	if err != nil {
-		return Destination{}, err
+	if kind != DestDrive && kind != DestFolder {
+		return fmt.Errorf("bad destination kind %q", st.Kind)
 	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return Destination{}, err
+	if st.FSOverride != "" && st.FSOverride != "fat32" && st.FSOverride != "exfat" {
+		return fmt.Errorf("bad filesystem override %q", st.FSOverride)
 	}
-	d.ID = id
-	return d, nil
-}
-
-// GetDestination returns one target, or nil.
-func (s *Store) GetDestination(id int64) (*Destination, error) {
-	row := s.db.QueryRow(`SELECT id, path, kind, filesystem, fs_override,
-		bdm_prefix, free_bytes, total_bytes, updated_at FROM destinations WHERE id=?`, id)
-	return scanDestination(row)
-}
-
-// ListDestinations returns all targets in insertion order.
-func (s *Store) ListDestinations() ([]Destination, error) {
-	rows, err := s.db.Query(`SELECT id, path, kind, filesystem, fs_override,
-		bdm_prefix, free_bytes, total_bytes, updated_at FROM destinations ORDER BY id`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []Destination
-	for rows.Next() {
-		d, err := scanDestination(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, *d)
-	}
-	return out, rows.Err()
-}
-
-// UpdateDestinationPrefix sets the BDM prefix.
-func (s *Store) UpdateDestinationPrefix(id int64, prefix string) error {
-	_, err := s.db.Exec(`UPDATE destinations SET bdm_prefix=?,
-		updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`, prefix, id)
+	_, err := s.db.Exec(`INSERT INTO destination_settings(path, kind, fs_override, bdm_prefix,
+		updated_at) VALUES (?,?,?,?,
+		strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+		ON CONFLICT(path) DO UPDATE SET kind=excluded.kind, fs_override=excluded.fs_override,
+		bdm_prefix=excluded.bdm_prefix,
+		updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+		st.Path, string(kind), st.FSOverride, st.BDMPrefix)
 	return err
 }
 
-// UpdateDestinationOverride sets the explicit filesystem choice
-// ("" clears it back to detection).
-func (s *Store) UpdateDestinationOverride(id int64, override string) error {
-	if override != "" && override != "fat32" && override != "exfat" {
-		return fmt.Errorf("bad filesystem override %q", override)
-	}
-	res, err := s.db.Exec(`UPDATE destinations SET fs_override=?,
-		updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`, override, id)
-	if err != nil {
-		return err
-	}
-	return expectOne(res, id, "override (missing destination)")
-}
-
-// ErrDestinationHasJobs is returned by DeleteDestination when jobs still
-// reference the destination.
-var ErrDestinationHasJobs = fmt.Errorf("destination has jobs")
-
-// DeleteDestination removes a tracked destination. It refuses when jobs
-// still reference it (remove or finish them first) and drops any lock row
-// alongside, so a re-added drive starts clean.
-func (s *Store) DeleteDestination(id int64) error {
-	var n int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM jobs WHERE destination_id=?`, id).Scan(&n); err != nil {
-		return err
-	}
-	if n > 0 {
-		return fmt.Errorf("%w: destination %d has %d job(s)", ErrDestinationHasJobs, id, n)
-	}
-	res, err := s.db.Exec(`DELETE FROM destinations WHERE id=?`, id)
-	if err != nil {
-		return err
-	}
-	if err := expectOne(res, id, "destination (missing destination)"); err != nil {
-		return err
-	}
-	_, err = s.db.Exec(`DELETE FROM dest_locks WHERE destination_id=?`, id)
-	return err
-}
-
-// RefreshDestinationStats records freshly probed filesystem/free space.
-func (s *Store) RefreshDestinationStats(id int64, filesystem string, freeBytes, totalBytes int64) error {
-	_, err := s.db.Exec(`UPDATE destinations SET filesystem=?, free_bytes=?, total_bytes=?,
-		updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
-		filesystem, freeBytes, totalBytes, id)
-	return err
-}
-
-func scanDestination(r rowScanner) (*Destination, error) {
-	var d Destination
+// GetSettings returns the customization for a path, or nil when the path
+// was never customized.
+func (s *Store) GetSettings(path string) (*DestinationSettings, error) {
+	var st DestinationSettings
 	var kind string
-	err := r.Scan(&d.ID, &d.Path, &kind, &d.Filesystem, &d.FSOverride,
-		&d.BDMPrefix, &d.FreeBytes, &d.TotalBytes, &d.UpdatedAt)
+	err := s.db.QueryRow(`SELECT path, kind, fs_override, bdm_prefix, updated_at
+		FROM destination_settings WHERE path=?`, path).Scan(
+		&st.Path, &kind, &st.FSOverride, &st.BDMPrefix, &st.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	d.Kind = DestinationKind(kind)
-	return &d, nil
+	st.Kind = DestinationKind(kind)
+	return &st, nil
+}
+
+// ListSettings returns all customized paths in path order.
+func (s *Store) ListSettings() ([]DestinationSettings, error) {
+	rows, err := s.db.Query(`SELECT path, kind, fs_override, bdm_prefix, updated_at
+		FROM destination_settings ORDER BY path`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DestinationSettings
+	for rows.Next() {
+		var st DestinationSettings
+		var kind string
+		if err := rows.Scan(&st.Path, &kind, &st.FSOverride, &st.BDMPrefix, &st.UpdatedAt); err != nil {
+			return nil, err
+		}
+		st.Kind = DestinationKind(kind)
+		out = append(out, st)
+	}
+	return out, rows.Err()
+}
+
+// ErrDestinationHasJobs is returned by DeleteSettings when jobs still
+// reference the path.
+var ErrDestinationHasJobs = fmt.Errorf("destination has jobs")
+
+// DeleteSettings removes per-path customization. It refuses while jobs
+// still reference the path (remove or finish them first).
+func (s *Store) DeleteSettings(path string) error {
+	var n int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM jobs WHERE destination_path=?`, path).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		return fmt.Errorf("%w: destination %s has %d job(s)", ErrDestinationHasJobs, path, n)
+	}
+	res, err := s.db.Exec(`DELETE FROM destination_settings WHERE path=?`, path)
+	if err != nil {
+		return err
+	}
+	n64, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n64 == 0 {
+		return fmt.Errorf("no customization for destination %s", path)
+	}
+	return nil
 }
 
 // --- Jobs ---
@@ -259,15 +345,18 @@ func (s *Store) Enqueue(jobs []Job) ([]Job, error) {
 		if !validKind(j.Kind) {
 			return nil, fmt.Errorf("bad job kind %q", j.Kind)
 		}
+		if j.DestinationPath == "" {
+			return nil, fmt.Errorf("job destination path is empty")
+		}
 		if j.Status == "" {
 			j.Status = JobPending
 		}
 		max.Int64++
 		res, err := s.db.Exec(`INSERT INTO jobs
-			(library_item_id, destination_id, kind, "order", status, phase,
+			(library_item_id, destination_path, kind, "order", status, phase,
 			 bytes_total, bytes_done, error)
 			VALUES (?,?,?,?,?,?,?,?,?)`,
-			j.LibraryItemID, j.DestinationID, string(j.Kind), max.Int64,
+			j.LibraryItemID, j.DestinationPath, string(j.Kind), max.Int64,
 			string(j.Status), j.Phase, j.BytesTotal, j.BytesDone, j.Error)
 		if err != nil {
 			return nil, err
@@ -292,7 +381,7 @@ func validKind(k JobKind) bool {
 
 // GetJob returns one job, or nil.
 func (s *Store) GetJob(id int64) (*Job, error) {
-	row := s.db.QueryRow(`SELECT id, library_item_id, destination_id, kind,
+	row := s.db.QueryRow(`SELECT id, library_item_id, destination_path, kind,
 		"order", status, phase, bytes_total, bytes_done, error, attempt_count,
 		created_at, updated_at FROM jobs WHERE id=?`, id)
 	return scanJob(row)
@@ -300,7 +389,7 @@ func (s *Store) GetJob(id int64) (*Job, error) {
 
 // ListJobs returns all jobs in queue order.
 func (s *Store) ListJobs() ([]Job, error) {
-	rows, err := s.db.Query(`SELECT id, library_item_id, destination_id, kind,
+	rows, err := s.db.Query(`SELECT id, library_item_id, destination_path, kind,
 		"order", status, phase, bytes_total, bytes_done, error, attempt_count,
 		created_at, updated_at FROM jobs ORDER BY "order"`)
 	if err != nil {
@@ -318,15 +407,37 @@ func (s *Store) ListJobs() ([]Job, error) {
 	return out, rows.Err()
 }
 
+// ActiveJobPaths returns distinct paths with live jobs (pending, running,
+// or paused) — the set of destinations the executor must serve, even when
+// their drives are currently unplugged.
+func (s *Store) ActiveJobPaths() ([]string, error) {
+	rows, err := s.db.Query(`SELECT DISTINCT destination_path FROM jobs
+		WHERE status IN (?,?,?) ORDER BY destination_path`,
+		string(JobPending), string(JobRunning), string(JobPaused))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 // PeekPending returns the lowest-order pending job for a destination
 // WITHOUT claiming it, so the executor can prepare it in the background
 // while the current job writes. The claim still goes through NextPending,
 // which skips per-job paused entries and races safely.
-func (s *Store) PeekPending(destinationID int64) (job *Job, ok bool, err error) {
+func (s *Store) PeekPending(destinationPath string) (job *Job, ok bool, err error) {
 	var id int64
 	err = s.db.QueryRow(`SELECT id FROM jobs
-		WHERE destination_id=? AND status=? ORDER BY "order" LIMIT 1`,
-		destinationID, string(JobPending)).Scan(&id)
+		WHERE destination_path=? AND status=? ORDER BY "order" LIMIT 1`,
+		destinationPath, string(JobPending)).Scan(&id)
 	if err == sql.ErrNoRows {
 		return nil, false, nil
 	}
@@ -343,11 +454,11 @@ func (s *Store) PeekPending(destinationID int64) (job *Job, ok bool, err error) 
 // NextPending claims the lowest-order pending job for a destination,
 // skipping per-job paused entries. ok=false when the queue is dry. The
 // UPDATE is atomic: two executors racing claim different rows.
-func (s *Store) NextPending(destinationID int64) (job *Job, ok bool, err error) {
+func (s *Store) NextPending(destinationPath string) (job *Job, ok bool, err error) {
 	var id int64
 	err = s.db.QueryRow(`SELECT id FROM jobs
-		WHERE destination_id=? AND status=? ORDER BY "order" LIMIT 1`,
-		destinationID, string(JobPending)).Scan(&id)
+		WHERE destination_path=? AND status=? ORDER BY "order" LIMIT 1`,
+		destinationPath, string(JobPending)).Scan(&id)
 	if err == sql.ErrNoRows {
 		return nil, false, nil
 	}
@@ -511,11 +622,11 @@ func (s *Store) Reorder(id int64, position int) error {
 
 // InFlightBytes sums bytes_total minus bytes_done over active jobs for a
 // destination (free-space accounting at enqueue).
-func (s *Store) InFlightBytes(destinationID int64) (int64, error) {
+func (s *Store) InFlightBytes(destinationPath string) (int64, error) {
 	var total sql.NullInt64
 	err := s.db.QueryRow(`SELECT COALESCE(SUM(bytes_total-bytes_done),0)
-		FROM jobs WHERE destination_id=? AND status IN (?,?,?)`,
-		destinationID, string(JobPending), string(JobRunning), string(JobPaused)).Scan(&total)
+		FROM jobs WHERE destination_path=? AND status IN (?,?,?)`,
+		destinationPath, string(JobPending), string(JobRunning), string(JobPaused)).Scan(&total)
 	return total.Int64, err
 }
 
@@ -535,7 +646,7 @@ type rowScanner interface{ Scan(dest ...any) error }
 func scanJob(r rowScanner) (*Job, error) {
 	var j Job
 	var kind, status string
-	err := r.Scan(&j.ID, &j.LibraryItemID, &j.DestinationID, &kind,
+	err := r.Scan(&j.ID, &j.LibraryItemID, &j.DestinationPath, &kind,
 		&j.Order, &status, &j.Phase, &j.BytesTotal, &j.BytesDone, &j.Error, &j.Attempts,
 		&j.CreatedAt, &j.UpdatedAt)
 	if err == sql.ErrNoRows {
@@ -605,18 +716,18 @@ func (s *Store) Paused() (bool, error) {
 
 // --- Cross-process destination locks ---
 
-// AcquireLock claims the destination for owner (hostname:pid:token). A
-// missing row is created; a fresh heartbeat refuses; a stale one is taken
-// over (previous holder died without releasing).
-func (s *Store) AcquireLock(destinationID int64, owner string) error {
+// AcquireLock claims the destination path for owner (hostname:pid:token).
+// A missing row is created; a fresh heartbeat refuses; a stale one is
+// taken over (previous holder died without releasing).
+func (s *Store) AcquireLock(destinationPath string, owner string) error {
 	var cur string
 	var updated string
 	err := s.db.QueryRow(`SELECT owner, updated_at FROM dest_locks
-		WHERE destination_id=?`, destinationID).Scan(&cur, &updated)
+		WHERE destination_path=?`, destinationPath).Scan(&cur, &updated)
 	switch {
 	case err == sql.ErrNoRows:
-		_, err := s.db.Exec(`INSERT INTO dest_locks(destination_id, owner) VALUES (?,?)`,
-			destinationID, owner)
+		_, err := s.db.Exec(`INSERT INTO dest_locks(destination_path, owner) VALUES (?,?)`,
+			destinationPath, owner)
 		return err
 	case err != nil:
 		return err
@@ -624,29 +735,34 @@ func (s *Store) AcquireLock(destinationID int64, owner string) error {
 	ts, terr := time.Parse("2006-01-02T15:04:05.999Z", updated)
 	if terr != nil || time.Since(ts) > lockStaleAfter {
 		_, err := s.db.Exec(`UPDATE dest_locks SET owner=?,
-			updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE destination_id=?`,
-			owner, destinationID)
+			updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE destination_path=?`,
+			owner, destinationPath)
 		return err
 	}
-	return fmt.Errorf("destination %d held by %s (heartbeat %s ago)",
-		destinationID, cur, time.Since(ts).Round(time.Second))
+	return fmt.Errorf("destination %s held by %s (heartbeat %s ago)",
+		destinationPath, cur, time.Since(ts).Round(time.Second))
 }
 
 // Heartbeat refreshes an owned lock.
-func (s *Store) Heartbeat(destinationID int64, owner string) error {
+func (s *Store) Heartbeat(destinationPath string, owner string) error {
 	res, err := s.db.Exec(`UPDATE dest_locks SET
 		updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
-		WHERE destination_id=? AND owner=?`, destinationID, owner)
+		WHERE destination_path=? AND owner=?`, destinationPath, owner)
 	if err != nil {
 		return err
 	}
-	return expectOne(res, destinationID, "heartbeat (lock lost)")
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		return fmt.Errorf("destination %s: cannot heartbeat (lock lost)", destinationPath)
+	}
+	return nil
 }
 
 // ReleaseLock drops an owned lock.
-func (s *Store) ReleaseLock(destinationID int64, owner string) error {
+func (s *Store) ReleaseLock(destinationPath string, owner string) error {
 	_, err := s.db.Exec(`DELETE FROM dest_locks
-		WHERE destination_id=? AND owner=?`, destinationID, owner)
+		WHERE destination_path=? AND owner=?`, destinationPath, owner)
 	return err
 }
 

@@ -51,7 +51,7 @@ func TestEmberBiosGate(t *testing.T) {
 	defer qs.Close()
 	ls, _ := library.Open(":memory:")
 	defer ls.Close()
-	dest, _ := qs.AddDestination(Destination{Path: t.TempDir(), Kind: DestFolder})
+	dest := Destination{Path: t.TempDir(), Kind: DestFolder}
 
 	srcDir := t.TempDir()
 	cue := makePS1Cue(t, srcDir)
@@ -81,7 +81,7 @@ func TestEmberPlanAndExecute(t *testing.T) {
 	defer qs.Close()
 	ls, _ := library.Open(":memory:")
 	defer ls.Close()
-	dest, _ := qs.AddDestination(Destination{Path: t.TempDir(), Kind: DestFolder, Filesystem: "exfat"})
+	dest := Destination{Path: t.TempDir(), Kind: DestFolder, Filesystem: "exfat"}
 	writeBios(t, dest.Path, dest.BDMPrefix, 512*1024)
 
 	srcDir := t.TempDir()
@@ -100,7 +100,7 @@ func TestEmberPlanAndExecute(t *testing.T) {
 	}
 
 	// Enqueue and execute
-	jobs, err := qs.Enqueue([]Job{{LibraryItemID: it.ID, DestinationID: dest.ID, Kind: KindEmberCopy, BytesTotal: pv.Total}})
+	jobs, err := qs.Enqueue([]Job{{LibraryItemID: it.ID, DestinationPath: dest.Path, Kind: KindEmberCopy, BytesTotal: pv.Total}})
 	if err != nil {
 		t.Fatal(err)
 	}

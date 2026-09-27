@@ -10,7 +10,7 @@ DB=$(mktemp)
 trap 'rm -rf "$BIN" "$FIX" "$DB"' EXIT
 
 echo "== build =="
-go build -o "$BIN" ./cmd/oplbm
+go build -o "$BIN" .
 
 echo "== fixtures =="
 go run ./testdata/gensrc --out "$FIX"

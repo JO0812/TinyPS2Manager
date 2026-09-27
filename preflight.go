@@ -12,15 +12,15 @@ func cmdPreflight(args []string) error {
 	fs := flag.NewFlagSet("preflight", flag.ContinueOnError)
 	dbPath := fs.String("db", "", "SQLite path (default $CONFIG/oplbm/oplbm.db)")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: oplbm preflight --device <id> [--db path]\n")
+		fmt.Fprintf(os.Stderr, "Usage: oplbm preflight --device <path> [--db path]\n")
 		fs.PrintDefaults()
 	}
-	var deviceID int64
-	fs.Int64Var(&deviceID, "device", 0, "destination id")
+	var devicePath string
+	fs.StringVar(&devicePath, "device", "", "destination path")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if deviceID == 0 {
+	if devicePath == "" {
 		fs.Usage()
 		return fmt.Errorf("--device is required")
 	}
@@ -33,12 +33,12 @@ func cmdPreflight(args []string) error {
 		return err
 	}
 	defer qstore.Close()
-	dest, err := qstore.GetDestination(deviceID)
+	dest, err := queue.ResolveDestination(qstore, devicePath)
 	if err != nil {
 		return err
 	}
 	if dest == nil {
-		return fmt.Errorf("no destination %d", deviceID)
+		return fmt.Errorf("no destination %q", devicePath)
 	}
 	res, err := queue.Preflight(dest)
 	if err != nil {

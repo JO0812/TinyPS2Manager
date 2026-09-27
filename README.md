@@ -127,7 +127,7 @@ All heavy lifting is **streaming** (`io.Copy` + `1–2 MiB` ring, never `ReadFil
 <summary><strong>Project layout</strong></summary>
 
 ```
-cmd/oplbm/          CLI + serve + Wails (desktop.go)
+./oplbm (root)     CLI + serve + Wails (desktop.go)
 internal/
   library/          scan/hash/detect/database/GameID + SQLite
   isotool/          ISO9660 PVD + UDF NSR02/03
@@ -156,7 +156,7 @@ go test ./...                                   # incl. invariants N1-N6
 go test -run TestEmber ./internal/queue -count=1 -v
 go test -tags=genfixtures ./testdata            # regen synthetic fixtures (<100 MiB)
 
-GOOS=windows GOARCH=amd64 go build -o dist/oplbm.exe ./cmd/oplbm  # cross matrix: linux/amd64,arm64 darwin/amd64,arm64 windows/amd64
+GOOS=windows GOARCH=amd64 go build -o dist/oplbm.exe .  # cross matrix: linux/amd64,arm64 darwin/amd64,arm64 windows/amd64
 wails build -tags desktop                       # → build/bin/oplbm (needs libwebkit2gtk-4.1-dev on Linux)
 ./scripts/gen-third-party.sh                    # THIRD_PARTY.md + licenses/
 

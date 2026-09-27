@@ -18,7 +18,7 @@ mkdir -p dist
 
 # Headless binary always builds (no CGO, no Wails).
 echo "building headless binary -> dist/oplbm"
-go build -o dist/oplbm ./cmd/oplbm
+go build -o dist/oplbm .
 
 # Desktop binary / bundle when possible (requires CGO + Wails).
 # webkit2_41 is mandatory, not optional: without it Wails compiles the
@@ -32,11 +32,11 @@ if command -v wails >/dev/null 2>&1; then
     echo "wails build OK -> build/bin/"
   else
     echo "wails build failed, falling back to go build -tags desktop -> dist/oplbm-desktop" >&2
-    go build -tags desktop -o dist/oplbm-desktop ./cmd/oplbm 2>&1 | head -n 50 || true
+    go build -tags desktop -o dist/oplbm-desktop . 2>&1 | head -n 50 || true
   fi
 else
   echo "wails CLI not installed (go install github.com/wailsapp/wails/v2/cmd/wails@latest); attempting desktop go build" >&2
-  go build -tags desktop -o dist/oplbm-desktop ./cmd/oplbm 2>&1 | head -n 50 || {
+  go build -tags desktop -o dist/oplbm-desktop . 2>&1 | head -n 50 || {
     echo "desktop build needs CGO/webkit; headless dist/oplbm is usable (oplbm serve / CLI)" >&2
   }
 fi
