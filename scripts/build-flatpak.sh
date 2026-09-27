@@ -20,10 +20,11 @@ fi
 ./scripts/gen-third-party.sh
 
 echo "Building Flatpak (this may take a few minutes)..."
-# --share=network: the sandbox build runs `go build`, which downloads Go
-# modules (and a newer Go toolchain if the SDK's is older than go.mod).
-# web/dist and licenses/ are prebuilt above and shipped via the dir source.
-flatpak-builder --user --disable-rofiles-fuse --share=network --repo=repo --force-clean --ccache flatpak-build "$MANIFEST"
+# The sandbox build runs `go build`, which downloads Go modules (and a
+# newer Go toolchain if the SDK's is older than go.mod); module builds
+# inherit host network. web/dist and licenses/ are prebuilt above and
+# shipped via the dir source.
+flatpak-builder --user --disable-rofiles-fuse --repo=repo --force-clean --ccache flatpak-build "$MANIFEST"
 
 if [ "${1:-}" = "--install" ]; then
   echo "Installing to user..."

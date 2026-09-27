@@ -3,6 +3,16 @@
   "runtime": "org.freedesktop.Platform",
   "runtime-version": "24.08",
   "sdk": "org.freedesktop.Sdk",
+  "sdk-extensions": [
+    "org.freedesktop.Sdk.Extension.golang"
+  ],
+  "build-options": {
+    "prepend-path": "/usr/lib/sdk/golang/bin",
+    "env": {
+      "GOCACHE": "/tmp/go-cache",
+      "GOPATH": "/tmp/go-path"
+    }
+  },
   "command": "oplbm",
   "finish-args": [
     "--share=network",
