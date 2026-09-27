@@ -27,11 +27,15 @@ func TestRemovableDevice(t *testing.T) {
 }
 
 func TestVolumesFromMounts(t *testing.T) {
+	// Fixture devices use names that cannot exist on any host
+	// (resolveLabel matches /dev/disk/by-label symlinks against them, so a
+	// plausible name like /dev/sda1 collides with the CI runner's real root
+	// disk and picks up its label instead of the mount basename).
 	mounts := `overlay / overlay rw,relatime 0 0
-/dev/sda1 /media/jo/34FF-D9F8 exfat rw,relatime 0 0
-/dev/sdb1 /mnt/stick vfat rw 0 0
-/dev/sdb1 /mnt/stick vfat rw 0 0
-/dev/sdc1 /home/jo/data ext4 rw 0 0
+/dev/sdfake1 /media/jo/34FF-D9F8 exfat rw,relatime 0 0
+/dev/sdfake2 /mnt/stick vfat rw 0 0
+/dev/sdfake2 /mnt/stick vfat rw 0 0
+/dev/sdfake3 /home/jo/data ext4 rw 0 0
 /dev/loop0 /snap/foo snap squashfs ro 0 0
 tmpfs /tmp tmpfs rw 0 0
 `
