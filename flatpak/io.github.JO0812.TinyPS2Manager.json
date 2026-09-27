@@ -3,16 +3,6 @@
   "runtime": "org.freedesktop.Platform",
   "runtime-version": "24.08",
   "sdk": "org.freedesktop.Sdk",
-  "sdk-extensions": [
-    "org.freedesktop.Sdk.Extension.golang"
-  ],
-  "build-options": {
-    "prepend-path": "/usr/lib/sdk/golang/bin",
-    "env": {
-      "GOCACHE": "/tmp/go-cache",
-      "GOPATH": "/tmp/go-path"
-    }
-  },
   "command": "oplbm",
   "finish-args": [
     "--share=network",
@@ -28,7 +18,7 @@
       "name": "oplbm",
       "buildsystem": "simple",
       "build-commands": [
-        "go build -o /app/bin/oplbm .",
+        "install -Dm755 flatpak/oplbm /app/bin/oplbm",
         "install -Dm644 flatpak/io.github.JO0812.TinyPS2Manager.appdata.xml /app/share/metainfo/io.github.JO0812.TinyPS2Manager.appdata.xml",
         "install -Dm644 flatpak/io.github.JO0812.TinyPS2Manager.desktop /app/share/applications/io.github.JO0812.TinyPS2Manager.desktop",
         "install -Dm644 flatpak/io.github.JO0812.TinyPS2Manager.svg /app/share/icons/hicolor/scalable/apps/io.github.JO0812.TinyPS2Manager.svg",

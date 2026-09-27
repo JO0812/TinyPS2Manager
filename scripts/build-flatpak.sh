@@ -15,9 +15,11 @@ if [ ! -f "$MANIFEST" ]; then
   exit 1
 fi
 
-# Ensure web is built and licenses are generated (flatpak's dir source skips build/dist)
+# Ensure web, notices, and the Go binary are built (the sandbox only
+# installs prebuilt files: no Go toolchain or npm inside).
 ./scripts/build-web.sh
 ./scripts/gen-third-party.sh
+go build -o flatpak/oplbm .
 
 echo "Building Flatpak (this may take a few minutes)..."
 # The sandbox build runs `go build`, which downloads Go modules (and a
@@ -28,10 +30,10 @@ flatpak-builder --user --disable-rofiles-fuse --repo=repo --force-clean --ccache
 
 if [ "${1:-}" = "--install" ]; then
   echo "Installing to user..."
-  flatpak --user install -y repo io.github.JO0812.TinyPS2Manager || true
+  flatpak --user install -y repo io.github.JO0812.TinyPS2Manager
   echo "Run: flatpak run io.github.JO0812.TinyPS2Manager"
 else
-  flatpak build-bundle repo io.github.JO0812.TinyPS2Manager.flatpak io.github.JO0812.TinyPS2Manager --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo || true
-  ls -lh io.github.JO0812.TinyPS2Manager.flatpak 2>/dev/null || echo "bundle at repo/ (use build-bundle to create .flatpak)"
-  echo "To install: flatpak --user install repo io.github.JO0812.TinyPS2Manager"
+  flatpak build-bundle repo io.github.JO0812.TinyPS2Manager.flatpak io.github.JO0812.TinyPS2Manager --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo
+  ls -lh io.github.JO0812.TinyPS2Manager.flatpak
+  echo "To install: flatpak --user install io.github.JO0812.TinyPS2Manager.flatpak"
 fi

@@ -34,3 +34,5 @@ testdata/*.db
 
 # Local config overrides
 .oplbm.env
+# Flatpak staged binary (built by scripts/build-flatpak.sh, shipped via dir source)
+/flatpak/oplbm
