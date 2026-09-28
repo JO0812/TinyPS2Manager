@@ -67,9 +67,9 @@ async function clickText(page, scope, text) {
   const itemCount = await page.evaluate(() => fetch('/api/library').then((r) => r.json()).then((d) => d.length));
   check('import-via-ui', itemCount === 5, `items=${itemCount}`);
 
-  // 2. Destination via Drive Options UI.
+  // 2. Destination via Toolbox UI.
   await page.evaluate(() => {
-    [...document.querySelectorAll('aside nav button')].find((x) => x.title.includes('Drive')).click();
+    [...document.querySelectorAll('aside nav button')].find((x) => x.title.includes('Toolbox')).click();
   });
   await new Promise((r) => setTimeout(r, 500));
   await setInput(page, '.drives input', DEV);
@@ -112,7 +112,7 @@ async function clickText(page, scope, text) {
 
   // 3. Enqueue first card via its … menu.
   await page.evaluate(() => {
-    [...document.querySelectorAll('aside nav button')].find((x) => x.title.includes('Library')).click();
+    [...document.querySelectorAll('aside nav button')].find((x) => x.title.includes('Games')).click();
   });
   await new Promise((r) => setTimeout(r, 800));
   await page.evaluate(async () => {
@@ -142,9 +142,9 @@ async function clickText(page, scope, text) {
   );
   check('enqueue-via-card-menu', true);
 
-  // 4. Activity pause-all/resume-all buttons.
+  // 4. Queue pause-all/resume-all buttons.
   await page.evaluate(() => {
-    [...document.querySelectorAll('aside nav button')].find((x) => x.title.includes('Activity')).click();
+    [...document.querySelectorAll('aside nav button')].find((x) => x.title.includes('Queue')).click();
   });
   await new Promise((r) => setTimeout(r, 800));
   const paused = await page.evaluate(async () => {

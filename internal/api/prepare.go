@@ -193,6 +193,17 @@ func (s *Server) treePreview(dest *queue.Destination, itemIDs []int64, forcedKin
 	}
 	sort.Strings(dirs)
 	sort.Strings(files)
+	// Never hand null lists to the UI: a clean plan has no warnings and
+	// an all-error plan has no tree, and both must still render.
+	if dirs == nil {
+		dirs = []string{}
+	}
+	if files == nil {
+		files = []string{}
+	}
+	if warnings == nil {
+		warnings = []string{}
+	}
 	return dirs, files, warnings
 }
 

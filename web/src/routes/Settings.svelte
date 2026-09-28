@@ -31,7 +31,6 @@
   onMount(load);
 </script>
 
-<p class="eyebrow">App</p>
 <h1 class="view-title">Settings</h1>
 
 {#if notice}

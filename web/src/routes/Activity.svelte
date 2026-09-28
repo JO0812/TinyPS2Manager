@@ -97,9 +97,8 @@
   onDestroy(() => stopEvents?.());
 </script>
 
-<p class="eyebrow">Transfers</p>
 <div class="title-row">
-  <h1 class="view-title">Activity</h1>
+  <h1 class="view-title">Queue</h1>
   <button class="btn-ghost" onclick={toggleAll}>{pausedAll ? 'Resume all' : 'Pause all'}</button>
 </div>
 

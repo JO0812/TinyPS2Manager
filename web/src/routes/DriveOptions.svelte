@@ -1,13 +1,27 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, formatBytes, type Destination, type LibraryItem, type Volume } from '../lib/api';
-  import PrepareDialog from '../components/PrepareDialog.svelte';
+  import {
+    api,
+    formatBytes,
+    type Destination,
+    type LibraryItem,
+    type PreparePreview,
+    type PrepareResult,
+  } from '../lib/api';
+  import {
+    activeDest,
+    activePath,
+    destinations,
+    loadPreflight,
+    preflight,
+    preflightBusy,
+    preflightError,
+    refreshDrives,
+    setActivePath,
+    volumes,
+  } from '../lib/drive';
 
-  let destinations: Destination[] = [];
-  let volumes: Volume[] = [];
-  let selectedPath = '';
   let items: LibraryItem[] = [];
-  let showPrepare = false;
   let notice = '';
   let noticeKind: 'ok' | 'err' = 'ok';
 
@@ -20,14 +34,8 @@
 
   async function refresh() {
     try {
-      const [dests, libs, vols] = await Promise.all([api.destinations(), api.library(), api.volumes()]);
-      destinations = dests;
-      items = libs;
-      volumes = vols;
-      if (!dests.some((d) => d.path === selectedPath)) {
-        selectedPath = dests[0]?.path ?? '';
-        localStorage.setItem('oplbm.destPath', selectedPath);
-      }
+      items = await api.library();
+      await refreshDrives();
     } catch (e) {
       notice = e instanceof Error ? e.message : String(e);
       noticeKind = 'err';
@@ -35,8 +43,7 @@
   }
 
   function pick(path: string) {
-    selectedPath = path;
-    localStorage.setItem('oplbm.destPath', path);
+    setActivePath(path);
   }
 
   async function removeDrive(d: Destination) {
@@ -81,7 +88,7 @@
   function onPickVolume(path: string) {
     pickedVolume = path;
     if (!path) return;
-    const existing = destinations.find((d) => d.path === path);
+    const existing = $destinations.find((d) => d.path === path);
     if (existing) {
       pick(existing.path);
       notice = 'Already in the list — selected.';
@@ -94,11 +101,8 @@
   }
 
   // Pending values keep the user's choice on screen while its PATCH +
-  // refresh round-trips; without them the controls snap back to the stale
-  // server value on every unrelated re-render and rapid changes pile up.
-  // Per-field tokens make overlap safe: only the latest save of each field
-  // may clear its pending display, so an older save resolving late can't
-  // revert a newer choice.
+  // refresh round-trips. Per-field tokens make overlap safe: only the
+  // latest save of each field may clear its pending display.
   let pendingFs: string | null = null;
   let pendingPrefix: string | null = null;
   let fsBusy = false;
@@ -148,13 +152,11 @@
     }
   }
 
-  $: dest = destinations.find((d) => d.path === selectedPath);
+  $: dest = $activeDest;
   // Unplugged (stored but missing) destinations sink to the bottom so live
   // drives stay on top; the row itself carries the unplugged badge.
-  $: sorted = [...destinations].sort((a, b) => Number(a.reachable === false) - Number(b.reachable === false));
+  $: sorted = [...$destinations].sort((a, b) => Number(a.reachable === false) - Number(b.reachable === false));
   $: itemIds = items.map((i) => i.id);
-  // What the controls show: the in-flight choice wins over the last
-  // server snapshot so edits never visibly revert mid-save.
   $: fsShown = pendingFs ?? dest?.fsOverride ?? '';
   $: prefixShown = pendingPrefix ?? dest?.bdmPrefix ?? '';
 
@@ -164,48 +166,102 @@
     return d.totalBytes > 0 ? `${base} of ${formatBytes(d.totalBytes)})` : `${base})`;
   }
 
-  let preflight: { checks: { name: string; status: string; message: string }[]; blocked: boolean } | null = null;
-  let preflightBusy = false;
-  let preflightError = '';
+  // ---- Prepare card: the tree preview loads itself; the loader stays an
+  // explicit click (network fetches are always per-action), and one button
+  // enqueues everything. No dialog — this flow needs no interruption.
+  let tag: string = 'current-fan-favorite';
+  let ps1Mode: 'vcd' | 'ember' = 'vcd';
+  let preview: PreparePreview | null = null;
+  let previewBusy = false;
+  let previewError = '';
+  let result: PrepareResult | null = null;
+  let executeBusy = false;
+  let executeError = '';
 
-  // Sequence guard: overlapping loads resolve in any order; only the
-  // latest may paint. Without it a slow earlier response clobbers newer
-  // state after rapid dropdown changes.
-  let preflightSeq = 0;
+  let previewSeq = 0;
 
-  async function loadPreflight(path: string) {
-    const seq = ++preflightSeq;
-    preflightBusy = true;
-    preflightError = '';
+  function ps1Kind(): string | undefined {
+    return ps1Mode === 'ember' ? 'copy-ps1-ember' : undefined;
+  }
+
+  async function loadTreePreview() {
+    const path = $activePath;
+    if (!path || itemIds.length === 0) {
+      preview = null;
+      return;
+    }
+    const seq = ++previewSeq;
+    previewBusy = true;
+    previewError = '';
+    result = null;
     try {
-      const res = await api.preflight(path);
-      if (seq !== preflightSeq) return; // stale: a newer load is in flight
-      preflight = res;
+      const res = (await api.prepare(path, { mode: 'preview', itemIds, kind: ps1Kind() })) as PreparePreview;
+      if (seq !== previewSeq) return;
+      preview = res;
     } catch (e) {
-      if (seq !== preflightSeq) return;
-      preflightError = e instanceof Error ? e.message : String(e);
-      preflight = null;
+      if (seq !== previewSeq) return;
+      previewError = e instanceof Error ? e.message : String(e);
+      preview = null;
     } finally {
-      if (seq === preflightSeq) preflightBusy = false;
+      if (seq === previewSeq) previewBusy = false;
     }
   }
 
-  // Auto-load only when the SELECTION changes. destinations is replaced on
-  // every refresh (new object identities), so keying off `dest` refired a
-  // preflight fetch after every save — piling requests on slow devices.
-  $: if (selectedPath) {
-    void loadPreflight(selectedPath);
+  async function checkRelease() {
+    const path = $activePath;
+    if (!path) return;
+    const seq = ++previewSeq;
+    previewBusy = true;
+    previewError = '';
+    try {
+      const res = (await api.prepare(path, {
+        mode: 'preview',
+        itemIds,
+        riptoplTag: tag,
+        kind: ps1Kind(),
+      })) as PreparePreview;
+      if (seq !== previewSeq) return;
+      preview = res;
+    } catch (e) {
+      if (seq !== previewSeq) return;
+      previewError = e instanceof Error ? e.message : String(e);
+    } finally {
+      if (seq === previewSeq) previewBusy = false;
+    }
   }
 
-  onMount(() => {
-    selectedPath = localStorage.getItem('oplbm.destPath') || '';
-    refresh();
-  });
+  async function execute() {
+    const path = $activePath;
+    if (!path) return;
+    executeBusy = true;
+    executeError = '';
+    try {
+      const res = (await api.prepare(path, {
+        mode: 'execute',
+        itemIds,
+        riptoplTag: preview?.riptopl ? tag : undefined,
+        kind: ps1Kind(),
+      })) as PrepareResult;
+      result = res;
+      preview = null;
+    } catch (e) {
+      executeError = e instanceof Error ? e.message : String(e);
+    } finally {
+      executeBusy = false;
+    }
+  }
+
+  // Auto-preview when the drive or the library set changes.
+  $: previewKey = `${$activePath}|${itemIds.join(',')}|${ps1Mode}`;
+  $: if (previewKey) {
+    void loadTreePreview();
+  }
+
+  onMount(refresh);
 </script>
 
-<p class="eyebrow">Targets</p>
-<h1 class="view-title">Drive Options</h1>
-<p class="muted">The app writes to mounted drives and folders — it never formats or partitions (destructive work stays with your OS tools).</p>
+<h1 class="view-title">Toolbox</h1>
+<p class="muted lede">One active drive, prepared in one pass — folders are created, the loader is staged when asked, then everything is enqueued. This app never formats drives.</p>
 
 {#if notice}
   <p class="notice" class:err={noticeKind === 'err'}>{notice}</p>
@@ -213,13 +269,13 @@
 
 <div class="cols">
   <div class="card drives">
-    <h2>Destinations</h2>
-    {#if destinations.length === 0}
+    <h2>Drive</h2>
+    {#if $destinations.length === 0}
       <p class="muted">None yet — add your USB stick or staging folder below.</p>
     {/if}
     {#each sorted as d}
       <div class="drive-row">
-        <button class="drive" class:active={d.path === selectedPath} class:unreachable={d.reachable === false} onclick={() => pick(d.path)}>
+        <button class="drive" class:active={d.path === $activePath} class:unreachable={d.reachable === false} onclick={() => pick(d.path)}>
           <span class="drive-path">{d.path}</span>
           {#if d.reachable === false}
             <span class="pill pill-warn" title="Stored destination, currently unplugged — plug it back in to resume, or remove it with ✕">unplugged</span>
@@ -233,12 +289,12 @@
       </div>
     {/each}
     <h3>Add destination</h3>
-    {#if volumes.length > 0}
+    {#if $volumes.length > 0}
       <label>
         Detected drives
         <select value={pickedVolume} onchange={(e) => onPickVolume(e.currentTarget.value)} aria-label="Detected drives">
           <option value="">Choose a drive…</option>
-          {#each volumes as v}
+          {#each $volumes as v}
             <option value={v.path} disabled={v.added}>
               {v.label} — {(v.filesystem || 'unknown').toUpperCase()} · {formatBytes(v.freeBytes)}{v.added ? ' (added)' : ''}
             </option>
@@ -262,90 +318,171 @@
       <input class="field" bind:value={newPrefix} placeholder="BDM prefix (optional)" aria-label="BDM prefix" />
       <button class="btn-ghost" onclick={addDrive}>Add</button>
     </div>
+
+    {#if dest}
+      <div class="detail">
+        <h3>Selected drive</h3>
+        {#if dest.reachable === false}
+          <p class="notice err">Path is missing — drive unplugged? Plug it back in; the queue resumes on its own.</p>
+        {/if}
+        <dl>
+          <div><dt>Path</dt><dd>{dest.path}</dd></div>
+          <div><dt>Filesystem</dt><dd>{fsText(dest)}</dd></div>
+          <div><dt>Kind</dt><dd>{dest.kind}</dd></div>
+        </dl>
+        <label>
+          Filesystem override
+          <select
+            value={fsShown}
+            aria-busy={fsBusy}
+            onchange={(e) => saveFs(dest.path, e.currentTarget.value)}
+          >
+            <option value="">Auto-detect</option>
+            <option value="fat32">FAT32 (safe default)</option>
+            <option value="exfat">exFAT</option>
+          </select>
+          {#if fsBusy}<span class="muted small">Saving…</span>{/if}
+        </label>
+        <label>
+          BDM prefix
+          <input
+            class="field"
+            value={prefixShown}
+            aria-busy={prefixBusy}
+            onchange={(e) => savePrefix(dest.path, e.currentTarget.value)}
+            placeholder="(drive root)"
+          />
+          {#if prefixBusy}<span class="muted small">Saving…</span>{/if}
+        </label>
+
+        <div class="preflight">
+          <h3>Pre-flight checks</h3>
+          <button class="btn-ghost small" onclick={() => loadPreflight($activePath)} disabled={$preflightBusy || !$activePath}>
+            {$preflightBusy ? 'Checking…' : 'Re-check'}
+          </button>
+          {#if $preflightError}
+            <p class="notice err">{$preflightError}</p>
+          {/if}
+          {#if $preflight}
+            <ul class="checks">
+              {#each $preflight.checks as c}
+                <li class="check {c.status}">
+                  <span class="badge {c.status}">{c.status}</span>
+                  <strong>{c.name}</strong> — {c.message}
+                </li>
+              {/each}
+            </ul>
+            {#if $preflight.blocked}
+              <p class="notice err">Pre-flight blocked: fix fail checks before enqueue.</p>
+            {:else}
+              <p class="notice">Pre-flight passed (warnings are non-blocking).</p>
+            {/if}
+          {/if}
+        </div>
+      </div>
+    {/if}
   </div>
 
-  <div class="card detail">
-    {#if dest}
-      <h2>Selected drive</h2>
-      {#if dest.reachable === false}
-        <p class="notice err">Path is missing — drive unplugged? Plug it back in; the queue resumes on its own.</p>
-      {/if}
-      <dl>
-        <div><dt>Path</dt><dd>{dest.path}</dd></div>
-        <div><dt>Filesystem</dt><dd>{fsText(dest)}</dd></div>
-        <div><dt>Kind</dt><dd>{dest.kind}</dd></div>
-      </dl>
-      <label>
-        Filesystem override
-        <select
-          value={fsShown}
-          aria-busy={fsBusy}
-          onchange={(e) => saveFs(dest.path, e.currentTarget.value)}
-        >
-          <option value="">Auto-detect</option>
-          <option value="fat32">FAT32 (safe default)</option>
-          <option value="exfat">exFAT</option>
+  <div class="card prepare">
+    <h2>Prepare {itemIds.length} game{itemIds.length === 1 ? '' : 's'}</h2>
+    {#if !dest}
+      <p class="muted">Select a drive on the left first.</p>
+    {:else if dest.reachable === false}
+      <p class="notice err">Drive is unreachable — plug it back in first.</p>
+    {:else if $preflight?.blocked}
+      <p class="notice err">Fix pre-flight failures before preparing.</p>
+    {:else if itemIds.length === 0}
+      <p class="muted">Import games in Games first — they will all be prepared at once.</p>
+    {:else if result}
+      <p class="notice">Enqueued {result.jobs.length} jobs.
+        {#if result.riptopl}
+          Loader <strong>{result.riptopl.flavour}</strong> staged ({formatBytes(result.riptopl.elfSize)}, {result.riptopl.tag}).
+        {/if}
+      </p>
+      <h3>First boot on the PS2</h3>
+      <ol class="checklist">
+        {#each result.checklist as step}
+          <li>{step}</li>
+        {/each}
+      </ol>
+      <div class="row">
+        <button class="btn-ghost" onclick={() => { result = null; void loadTreePreview(); }}>Prepare again</button>
+      </div>
+    {:else}
+      <h3>RiptOPL loader</h3>
+      <div class="row">
+        <select bind:value={tag} aria-label="Release track">
+          <option value="current-fan-favorite">Stable snapshot (recommended)</option>
+          <option value="rolling">Rolling (latest, may be unstable)</option>
         </select>
-        {#if fsBusy}<span class="muted small">Saving…</span>{/if}
-      </label>
-      <label>
-        BDM prefix
-        <input
-          class="field"
-          value={prefixShown}
-          aria-busy={prefixBusy}
-          onchange={(e) => savePrefix(dest.path, e.currentTarget.value)}
-          placeholder="(drive root)"
-        />
-        {#if prefixBusy}<span class="muted small">Saving…</span>{/if}
-      </label>
-
-      <div class="preflight">
-        <h3>Pre-flight checks</h3>
-        <button class="btn-ghost small" onclick={() => loadPreflight(selectedPath)} disabled={preflightBusy || !selectedPath}>
-          {preflightBusy ? 'Checking…' : 'Re-check'}
+        <button class="btn-ghost" disabled={previewBusy} onclick={checkRelease}>
+          {previewBusy ? 'Checking…' : 'Check release'}
         </button>
-        {#if preflightError}
-          <p class="notice err">{preflightError}</p>
-        {/if}
-        {#if preflight}
-          <ul class="checks">
-            {#each preflight.checks as c}
-              <li class="check {c.status}">
-                <span class="badge {c.status}">{c.status}</span>
-                <strong>{c.name}</strong> — {c.message}
-              </li>
-            {/each}
-          </ul>
-          {#if preflight.blocked}
-            <p class="notice err">Pre-flight blocked: fix fail checks before enqueue.</p>
-          {:else}
-            <p class="notice">Pre-flight passed (warnings are non-blocking).</p>
-          {/if}
-        {/if}
+      </div>
+      {#if preview?.riptopl}
+        {@const loader = preview.riptopl}
+        <div class="loader">
+          <div><strong>{loader.tag}</strong> · {loader.asset} · {formatBytes(loader.sizeBytes)}</div>
+          <div class="muted small url">{loader.url}</div>
+          <div class="muted small">sha256 {loader.digest.slice(0, 16)}… · flavour order: {loader.flavours.join(', ')}</div>
+        </div>
+      {/if}
+
+      <h3>PS1 handling</h3>
+      <div class="row">
+        <select bind:value={ps1Mode} aria-label="PS1 mode">
+          <option value="vcd">POPSTARTER VCD (default, mature)</option>
+          <option value="ember">Ember (beta, no convert, needs bios.bin)</option>
+        </select>
+        <span class="muted small">Ember keeps CUE/BIN names, needs 512 KB EMBER/bios.bin at drive root</span>
       </div>
 
-      <button class="btn-primary big" onclick={() => (showPrepare = true)} disabled={items.length === 0 || preflight?.blocked || dest.reachable === false}>
-        Prepare external drive
-      </button>
-      {#if dest.reachable === false}
-        <p class="muted small">Drive is unreachable — plug it back in first.</p>
-      {:else if preflight?.blocked}
-        <p class="muted small">Fix pre-flight failures before preparing.</p>
-      {:else if items.length === 0}
-        <p class="muted small">Import games in the Library first.</p>
+      {#if previewError}
+        <p class="notice err">{previewError}</p>
       {/if}
-    {:else}
-      <p class="muted">Select a destination to inspect it.</p>
+      {#if executeError}
+        <p class="notice err">{executeError}</p>
+      {/if}
+
+      {#if preview}
+        <h3>Planned tree ({preview.files.length} files, {preview.dirs.length} folders)</h3>
+        {#if preview.warnings.length > 0}
+          <ul class="warn">
+            {#each preview.warnings as w}
+              <li>{w}</li>
+            {/each}
+          </ul>
+        {/if}
+        <details>
+          <summary>Show paths</summary>
+          <ul class="paths">
+            {#each preview.dirs as d}
+              <li class="dir">▸ {d}</li>
+            {/each}
+            {#each preview.files as f}
+              <li>{f}</li>
+            {/each}
+          </ul>
+        </details>
+      {:else if previewBusy}
+        <p class="muted">Planning the drive tree…</p>
+      {/if}
+
+      <button class="btn-primary big" onclick={execute} disabled={executeBusy || previewBusy || !preview || $preflight?.blocked}>
+        {executeBusy ? 'Preparing…' : 'Prepare & enqueue'}
+      </button>
     {/if}
   </div>
 </div>
 
-{#if showPrepare && dest}
-  <PrepareDialog {dest} {itemIds} onClose={() => (showPrepare = false)} />
-{/if}
-
 <style>
+  .view-title {
+    margin: 0 0 4px;
+  }
+  .lede {
+    margin: 0 0 16px;
+    max-width: 80ch;
+  }
   .cols {
     display: grid;
     grid-template-columns: minmax(280px, 380px) 1fr;
@@ -358,15 +495,16 @@
     }
   }
   .drives,
-  .detail {
+  .prepare {
     padding: 20px 22px;
   }
   .drives h2,
-  .detail h2 {
+  .prepare h2 {
     margin: 0 0 12px;
     font-size: 16px;
   }
-  .drives h3 {
+  .drives h3,
+  .prepare h3 {
     margin: 18px 0 8px;
     font-size: 14px;
   }
@@ -419,9 +557,10 @@
     gap: 8px;
     margin-top: 8px;
     flex-wrap: wrap;
+    align-items: center;
   }
   .row select,
-  .detail select,
+  .prepare select,
   .drives select {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -429,13 +568,19 @@
     padding: 8px 10px;
     color: var(--fg);
   }
-  .drives label {
+  .drives label,
+  .detail label {
     display: flex;
     flex-direction: column;
     gap: 6px;
     margin: 10px 0 4px;
     color: var(--fg-muted);
     font-size: 13px;
+  }
+  .detail {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
   }
   .detail dl {
     margin: 0 0 12px;
@@ -453,14 +598,6 @@
   .detail dd {
     margin: 0;
     word-break: break-all;
-  }
-  .detail label {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    margin: 10px 0;
-    color: var(--fg-muted);
-    font-size: 13px;
   }
   .big {
     margin-top: 12px;
@@ -532,5 +669,52 @@
   .badge.warn {
     background: rgba(251, 191, 36, 0.16);
     color: var(--warning);
+  }
+  .loader {
+    padding: 12px 14px;
+    margin-top: 10px;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  .url {
+    word-break: break-all;
+  }
+  .warn {
+    color: var(--warning);
+    margin: 0 0 8px 18px;
+    padding: 0;
+  }
+  details {
+    margin: 8px 0;
+  }
+  summary {
+    cursor: pointer;
+    color: var(--accent);
+  }
+  .paths {
+    list-style: none;
+    margin: 8px 0 0;
+    padding: 12px;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    max-height: 260px;
+    overflow-y: auto;
+    font-family: monospace;
+    font-size: 12px;
+  }
+  .paths li {
+    white-space: nowrap;
+  }
+  .paths .dir {
+    color: var(--accent);
+  }
+  .checklist {
+    margin: 0 0 8px 20px;
+    padding: 0;
+  }
+  .checklist li {
+    margin-bottom: 6px;
   }
 </style>

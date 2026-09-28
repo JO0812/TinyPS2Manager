@@ -153,9 +153,9 @@ async function enrichment(page, id) {
   check('tour-gameid-badges', badges.includes('SLUS_213.85') && badges.includes('SLES_512.30'), '');
   await page.screenshot({ path: path.join(SHOTS, '01-library.png') });
 
-  // ---- 2. Drive Options: add DEV, preflight rows, fs override ----
-  step('2-drive-options');
-  await nav(page, 'Drive');
+  // ---- 2. Toolbox: add DEV, preflight rows, fs override ----
+  step('2-toolbox');
+  await nav(page, 'Toolbox');
   await setInput(page, '.drives input', DEV);
   await clickText(page, '.drives', 'Add');
   await page.waitForFunction(() => document.body.textContent.includes('Destination added'), { timeout: 10000 });
@@ -190,8 +190,13 @@ async function enrichment(page, id) {
     return (await r.json()).blocked;
   }, dp);
   check('tour-folder-unblocked', blockedNow === false, `blocked=${blockedNow}`);
+  // The tree preview loads itself; the button enables once it lands.
+  await page.waitForFunction(() => {
+    const el = document.querySelector('.prepare');
+    return el && el.textContent.includes('Planned tree');
+  }, { timeout: 20000 });
   const prepEnabled = await page.evaluate(() => {
-    const b = [...document.querySelectorAll('.detail button')].find((x) => (x.textContent || '').includes('Prepare external drive'));
+    const b = [...document.querySelectorAll('.prepare button')].find((x) => (x.textContent || '').includes('Prepare & enqueue'));
     return !!b && !b.disabled;
   });
   check('tour-prepare-enabled', prepEnabled, '');
@@ -236,7 +241,7 @@ async function enrichment(page, id) {
 
   // ---- 4. Certain card: Fetch art + Stage cheats (picker) ----
   step('4-certain');
-  await nav(page, 'Library');
+  await nav(page, 'Games');
   await sleep(800);
   const cIdx = await cardIndex(page, certain.title);
   check('tour-certain-card', cIdx >= 0, `idx=${cIdx}`);
@@ -316,38 +321,26 @@ async function enrichment(page, id) {
   );
   check('tour-uncertain-staged', fs.existsSync(path.join(DEV, 'CHT', 'SLES_512.30.cht')), '');
 
-  // ---- 6. Prepare dialog: preview (VCD warning, loader URL, checklist) ----
+  // ---- 6. Prepare card: auto tree preview (VCD warning), loader URL, checklist ----
   step('6-prepare');
-  await nav(page, 'Drive');
-  await page.waitForFunction(() => !!document.querySelector('.detail'), { timeout: 15000 });
-  await clickText(page, '.detail', 'Prepare external drive');
-  try {
-    await page.waitForFunction(() => !!document.querySelector('.dialog'), { timeout: 10000 });
-  } catch (e) {
-    const dbg = await page.evaluate(() => {
-      const btns = [...document.querySelectorAll('.detail button')].map((b) => `${b.textContent.trim().slice(0, 30)} disabled=${b.disabled}`);
-      const pre = [...document.querySelectorAll('.preflight .check')].map((li) => li.textContent.trim().slice(0, 90));
-      return { btns, pre, hasDetail: !!document.querySelector('.detail') };
-    });
-    throw new Error('no dialog; ' + JSON.stringify(dbg));
-  }
+  await nav(page, 'Toolbox');
+  await page.waitForFunction(() => !!document.querySelector('.prepare'), { timeout: 15000 });
   step('6a-tree');
-  await clickText(page, '.dialog', 'Tree only');
-  await page.waitForFunction(() => [...document.querySelectorAll('.dialog .warn li')].length > 0, { timeout: 20000 });
-  const warns = await page.evaluate(() => [...document.querySelectorAll('.dialog .warn li')].map((li) => li.textContent));
+  await page.waitForFunction(() => [...document.querySelectorAll('.prepare .warn li')].length > 0, { timeout: 20000 });
+  const warns = await page.evaluate(() => [...document.querySelectorAll('.prepare .warn li')].map((li) => li.textContent));
   check('tour-vcd-warning', warns.some((w) => w.includes('POPSTARTER ceiling')), warns.join(' | '));
   step('6b-loader');
-  await clickText(page, '.dialog', 'Check release');
+  await clickText(page, '.prepare', 'Check release');
   let loaderOk = false;
   try {
     await page.waitForFunction(() => {
-      const el = document.querySelector('.dialog .loader .url');
+      const el = document.querySelector('.prepare .loader .url');
       return el && el.textContent.includes('github');
     }, { timeout: 30000 });
     loaderOk = true;
   } catch { loaderOk = false; }
   if (loaderOk) {
-    const lurl = await page.evaluate(() => document.querySelector('.dialog .loader .url').textContent);
+    const lurl = await page.evaluate(() => document.querySelector('.prepare .loader .url').textContent);
     check('tour-loader-url', lurl.includes('github.com') && lurl.includes('RIPTOPL'), lurl);
   } else {
     check('tour-loader-url', true, 'SKIPPED (release API unreachable)');
@@ -355,24 +348,23 @@ async function enrichment(page, id) {
   await page.screenshot({ path: path.join(SHOTS, '05-prepare-preview.png') });
   // Execute WITH loader when available, else tree execute.
   step('6c-execute');
-  await clickText(page, '.dialog', 'Prepare & enqueue');
+  await clickText(page, '.prepare', 'Prepare & enqueue');
   await page.waitForFunction(() => document.body.textContent.includes('Enqueued'), { timeout: loaderOk ? 180000 : 60000 });
   const enqText = await page.evaluate(() => document.body.textContent);
   const m = enqText.match(/Enqueued (\d+) jobs/);
   check('tour-prepare-enqueue', !!m && Number(m[1]) >= 7, m && m[0]);
-  const cl = await page.evaluate(() => [...document.querySelectorAll('.dialog .checklist li')].map((li) => li.textContent));
+  const cl = await page.evaluate(() => [...document.querySelectorAll('.prepare .checklist li')].map((li) => li.textContent));
   check('tour-checklist', cl.length >= 4 && cl.some((s) => s.includes('L3')), cl.join(' | ').slice(0, 120));
   if (loaderOk) {
     const elfDirs = fs.readdirSync(path.join(DEV, 'APPS')).filter((d) => d.startsWith('APP_RIPTOPL-'));
     const elfOk = elfDirs.some((d) => fs.existsSync(path.join(DEV, 'APPS', d, 'RIPTOPL.ELF')));
     check('tour-loader-staged', elfOk, elfDirs.join(','));
   }
-  step('6d-close');
-  await clickText(page, '.dialog', 'Close');
+  step('6d-done');
 
-  // ---- 7. Activity: skip the 2 GiB job, drain, artifacts ----
+  // ---- 7. Queue: skip the 2 GiB job, drain, artifacts ----
   step('7-activity');
-  await nav(page, 'Activity');
+  await nav(page, 'Queue');
   await sleep(1000);
   const jobs = await apiGet(page, '/api/queue');
   const bigItem = items.find((i) => i.title === 'big');

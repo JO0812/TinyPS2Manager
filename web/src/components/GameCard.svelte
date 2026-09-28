@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api, type LibraryItem } from '../lib/api';
+import { getActivePath } from '../lib/drive';
 
   export let item: LibraryItem;
   export let list: boolean = false;
@@ -34,8 +35,8 @@
   }
 
   function destPath(): string | null {
-    const p = localStorage.getItem('oplbm.destPath') || '';
-    if (!p) error = 'Pick a destination first (header panel).';
+    const p = getActivePath();
+    if (!p) error = 'Pick a drive in the Toolbox first.';
     return p || null;
   }
 
@@ -177,7 +178,7 @@
 
   async function loadEnrich() {
     try {
-      enrich = await api.enrichment(item.id, localStorage.getItem('oplbm.destPath') || undefined);
+      enrich = await api.enrichment(item.id, getActivePath() || undefined);
     } catch {
       // silent: enrichment is best-effort
     }

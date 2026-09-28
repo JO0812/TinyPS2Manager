@@ -1,14 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, type Destination, type LibraryItem } from '../lib/api';
+  import { api, type LibraryItem } from '../lib/api';
+  import { activeDest, refreshDrives } from '../lib/drive';
   import GameCard from '../components/GameCard.svelte';
-  import DestinationPanel from '../components/DestinationPanel.svelte';
+  import NoDrive from '../components/NoDrive.svelte';
 
-  export let onGoDrive: () => void;
+  export let onGoToolbox: () => void;
 
   let items: LibraryItem[] = [];
-  let destinations: Destination[] = [];
-  let selectedPath = '';
   let query = '';
   let platform: 'all' | 'ps2' | 'ps1' = 'all';
   let sort: 'name' | 'largest' | 'smallest' = 'name';
@@ -21,24 +20,14 @@
 
   async function refresh() {
     try {
-      const [libs, dests] = await Promise.all([api.library(), api.destinations()]);
+      const [libs] = await Promise.all([api.library(), refreshDrives()]);
       items = libs;
-      destinations = dests;
-      if (!dests.some((d) => d.path === selectedPath)) {
-        selectedPath = dests[0]?.path ?? '';
-        localStorage.setItem('oplbm.destPath', selectedPath);
-      }
     } catch (e) {
       notice = e instanceof Error ? e.message : String(e);
       noticeKind = 'err';
     } finally {
       loading = false;
     }
-  }
-
-  function pickDestination(path: string) {
-    selectedPath = path;
-    localStorage.setItem('oplbm.destPath', path);
   }
 
   async function doImport() {
@@ -85,11 +74,6 @@
         return a.rep.title.localeCompare(b.rep.title);
       });
   })();
-  $: fsBadge = (() => {
-    const d = destinations.find((x) => x.path === selectedPath);
-    return d ? (d.fsOverride || d.filesystem).toUpperCase() : '';
-  })();
-  $: fsKnown = fsBadge !== '' && fsBadge !== 'UNKNOWN';
 
   function hotkeys(e: KeyboardEvent) {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
@@ -100,23 +84,19 @@
   }
 
   onMount(() => {
-    selectedPath = localStorage.getItem('oplbm.destPath') || '';
     refresh();
     window.addEventListener('keydown', hotkeys);
     return () => window.removeEventListener('keydown', hotkeys);
   });
 </script>
 
-<p class="eyebrow">Game Vault</p>
 <div class="title-row">
-  <h1 class="view-title">Your game library</h1>
-  <div class="title-actions">
-    {#if fsBadge}
-      <span class="pill {fsKnown ? 'pill-green' : 'pill-gray'}">{fsBadge}</span>
-    {/if}
-    <button class="btn-primary" onclick={onGoDrive}>Prepare external drive</button>
-  </div>
+  <h1 class="view-title">Games <span class="muted count">{rows.length}</span></h1>
 </div>
+
+{#if !$activeDest && !loading}
+  <NoDrive onGoToolbox={onGoToolbox} />
+{/if}
 
 <div class="toolbar">
   <div class="search">
@@ -124,7 +104,7 @@
     <input
       bind:this={searchEl}
       bind:value={query}
-      placeholder="Search {items.length} installed games"
+      placeholder="Search {items.length} games"
       aria-label="Search games"
     />
     <kbd>⌘K</kbd>
@@ -145,8 +125,6 @@
   </div>
 </div>
 
-<DestinationPanel {destinations} {selectedPath} gameCount={items.length} onSelect={pickDestination} />
-
 {#if notice}
   <p class="notice" class:err={noticeKind === 'err'}>{notice}</p>
 {/if}
@@ -163,8 +141,6 @@
   />
   <button class="btn-ghost" onclick={doImport}>Scan folder</button>
 </div>
-
-<h2 class="section-title">Installed games <span class="muted">{rows.length}</span></h2>
 
 {#if loading}
   <p class="muted">Loading…</p>
@@ -199,10 +175,12 @@
     margin-bottom: 20px;
     flex-wrap: wrap;
   }
-  .title-actions {
-    display: flex;
-    align-items: center;
-    gap: 12px;
+  .view-title {
+    margin: 0;
+  }
+  .count {
+    font-size: 18px;
+    font-weight: 400;
   }
   .toolbar {
     display: flex;
@@ -281,10 +259,6 @@
     gap: 10px;
     padding: 12px;
     margin-bottom: 20px;
-  }
-  .section-title {
-    font-size: 18px;
-    margin: 0 0 14px;
   }
   .empty {
     padding: 28px;

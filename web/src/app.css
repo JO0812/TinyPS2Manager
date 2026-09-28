@@ -138,15 +138,6 @@ a {
   outline-offset: -1px;
 }
 
-.eyebrow {
-  color: var(--accent);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  margin: 0 0 4px;
-}
-
 h1.view-title {
   font-size: 28px;
   margin: 0;
