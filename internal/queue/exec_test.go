@@ -978,3 +978,50 @@ func rec(buf []byte, extent, size uint32, flags byte, name []byte) []byte {
 	copy(r[33:], name)
 	return append(buf, r...)
 }
+
+func TestTrackerSetAbsoluteVsAddDelta(t *testing.T) {
+	st := openTestStore(t)
+	res, err := st.db.Exec(`INSERT INTO jobs(library_item_id, destination_path, kind, "order", status, bytes_total)
+		VALUES (1, '/d', 'copy', 0, 'running', 1000)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Cumulative reports (transfer.CopyToDest): set() must replace, not
+	// accumulate — summing cumulative values overshoots the total and the
+	// UI reads thousands of percent.
+	tr := &tracker{store: st, id: id, total: 1000}
+	tr.set(250)
+	tr.set(500)
+	tr.set(1000)
+	got, err := st.GetJob(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.BytesDone != 1000 {
+		t.Fatalf("set(250,500,1000) -> bytes_done=%d, want 1000", got.BytesDone)
+	}
+	// Delta reports (tapWriter/countReader): add() must accumulate.
+	res2, err := st.db.Exec(`INSERT INTO jobs(library_item_id, destination_path, kind, "order", status, bytes_total)
+		VALUES (1, '/d', 'copy', 0, 'running', 1000)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id2, err := res2.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr2 := &tracker{store: st, id: id2, total: 1000}
+	tr2.add(250)
+	tr2.add(250)
+	got2, err := st.GetJob(id2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got2.BytesDone != 500 {
+		t.Fatalf("add(250,250) -> bytes_done=%d, want 500", got2.BytesDone)
+	}
+}

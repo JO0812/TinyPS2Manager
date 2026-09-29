@@ -46,12 +46,6 @@ type MSF struct {
 	M, S, F int
 }
 
-// LBA converts the timestamp to a logical block address (frame count minus
-// the 150-frame lead-in).
-func (t MSF) LBA() int {
-	return ((t.M*60)+t.S)*75 + t.F - 150
-}
-
 // Frames returns the raw frame count (no lead-in subtraction).
 func (t MSF) Frames() int {
 	return ((t.M*60)+t.S)*75 + t.F

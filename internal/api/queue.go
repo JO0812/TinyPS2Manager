@@ -53,8 +53,6 @@ type apiError struct {
 	msg    string
 }
 
-func (e *apiError) Error() string { return e.msg }
-
 // enqueueItems validates (N4: manifests, chunks, fs, free space — all
 // through the executor's own Estimate planners) and inserts jobs. Shared
 // by POST /api/queue and the prepare-execute flow. If kind is non-empty

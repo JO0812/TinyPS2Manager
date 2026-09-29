@@ -21,6 +21,8 @@
     volumes,
   } from '../lib/drive';
 
+  import { browseFolder } from '../lib/dialog';
+
   let items: LibraryItem[] = [];
   let notice = '';
   let noticeKind: 'ok' | 'err' = 'ok';
@@ -28,9 +30,6 @@
   // Add-drive form.
   let pickedVolume = '';
   let newPath = '';
-  let newKind = 'folder';
-  let newFs = '';
-  let newPrefix = '';
 
   async function refresh() {
     try {
@@ -66,12 +65,9 @@
     try {
       const d = await api.createDestination({
         path: newPath.trim(),
-        kind: newKind,
-        filesystemOverride: newFs || undefined,
-        bdmPrefix: newPrefix.trim() || undefined,
+        kind: 'folder',
       });
       newPath = '';
-      newPrefix = '';
       pickedVolume = '';
       await refresh();
       pick(d.path);
@@ -83,9 +79,15 @@
     }
   }
 
-  // Picking a detected drive fills the form (kind=drive); picking one that
-  // is already tracked just selects it. Nothing is created until Add.
-  function onPickVolume(path: string) {
+  // Picking a detected drive adds it immediately (kind=drive, fs
+  // auto-detected); picking one that is already tracked just selects it.
+  // "Other folder…" reveals a single path field for staging folders.
+  // Filesystem override and BDM prefix live on the Selected-drive panel.
+  async function onPickVolume(path: string) {
+    if (path === '__other') {
+      pickedVolume = path;
+      return;
+    }
     pickedVolume = path;
     if (!path) return;
     const existing = $destinations.find((d) => d.path === path);
@@ -93,11 +95,22 @@
       pick(existing.path);
       notice = 'Already in the list — selected.';
       noticeKind = 'ok';
+      pickedVolume = '';
       return;
     }
-    newPath = path;
-    newKind = 'drive';
-    newFs = '';
+    notice = '';
+    try {
+      const d = await api.createDestination({ path, kind: 'drive' });
+      await refresh();
+      pick(d.path);
+      notice = 'Destination added.';
+      noticeKind = 'ok';
+    } catch (e) {
+      notice = e instanceof Error ? e.message : String(e);
+      noticeKind = 'err';
+    } finally {
+      pickedVolume = '';
+    }
   }
 
   // Pending values keep the user's choice on screen while its PATCH +
@@ -230,6 +243,17 @@
     }
   }
 
+  async function browse() {
+    const path = await browseFolder('Choose staging folder');
+    if (path) {
+      newPath = path;
+      notice = '';
+    } else {
+      notice = 'Folder picker is only available in the desktop app — type the path.';
+      noticeKind = 'err';
+    }
+  }
+
   async function execute() {
     const path = $activePath;
     if (!path) return;
@@ -264,7 +288,7 @@
 <p class="muted lede">One active drive, prepared in one pass — folders are created, the loader is staged when asked, then everything is enqueued. This app never formats drives.</p>
 
 {#if notice}
-  <p class="notice" class:err={noticeKind === 'err'}>{notice}</p>
+  <p class="notice" class:err={noticeKind === 'err'} role={noticeKind === 'err' ? 'alert' : 'status'}>{notice}</p>
 {/if}
 
 <div class="cols">
@@ -299,25 +323,27 @@
               {v.label} — {(v.filesystem || 'unknown').toUpperCase()} · {formatBytes(v.freeBytes)}{v.added ? ' (added)' : ''}
             </option>
           {/each}
+          <option value="__other">Other folder…</option>
         </select>
       </label>
     {:else}
-      <p class="muted small">No removable drives detected — type a path below.</p>
+      <p class="muted small">No removable drives detected — type a staging path below.</p>
     {/if}
-    <input class="field" bind:value={newPath} placeholder="/media/usb  or  /home/you/staging" aria-label="New destination path" />
-    <div class="row">
-      <select bind:value={newKind} aria-label="Kind">
-        <option value="folder">Folder</option>
-        <option value="drive">Drive</option>
-      </select>
-      <select bind:value={newFs} aria-label="Filesystem override">
-        <option value="">Auto-detect fs</option>
-        <option value="fat32">FAT32</option>
-        <option value="exfat">exFAT</option>
-      </select>
-      <input class="field" bind:value={newPrefix} placeholder="BDM prefix (optional)" aria-label="BDM prefix" />
-      <button class="btn-ghost" onclick={addDrive}>Add</button>
-    </div>
+    {#if pickedVolume === '__other' || $volumes.length === 0}
+      <div class="row">
+        <input
+          class="field"
+          bind:value={newPath}
+          placeholder="/home/you/staging"
+          aria-label="New destination path"
+          onkeydown={(e) => {
+            if (e.key === 'Enter') addDrive();
+          }}
+        />
+        <button class="btn-ghost" onclick={browse}>Browse…</button>
+        <button class="btn-ghost" onclick={addDrive}>Add</button>
+      </div>
+    {/if}
 
     {#if dest}
       <div class="detail">
@@ -551,6 +577,8 @@
   }
   .small {
     font-size: 12px;
+    min-height: 32px;
+    min-width: 32px;
   }
   .row {
     display: flex;

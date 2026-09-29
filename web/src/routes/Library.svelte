@@ -4,6 +4,7 @@
   import { activeDest, refreshDrives } from '../lib/drive';
   import GameCard from '../components/GameCard.svelte';
   import NoDrive from '../components/NoDrive.svelte';
+  import { browseFolder } from '../lib/dialog';
 
   export let onGoToolbox: () => void;
 
@@ -31,7 +32,11 @@
   }
 
   async function doImport() {
-    if (!importPath.trim()) return;
+    if (!importPath.trim()) {
+      notice = 'Type a source folder path first.';
+      noticeKind = 'err';
+      return;
+    }
     notice = '';
     try {
       const fresh = await api.importDir(importPath.trim());
@@ -74,6 +79,17 @@
         return a.rep.title.localeCompare(b.rep.title);
       });
   })();
+
+  async function browse() {
+    const path = await browseFolder('Choose source folder');
+    if (path) {
+      importPath = path;
+      notice = '';
+    } else {
+      notice = 'Folder picker is only available in the desktop app — type the path.';
+      noticeKind = 'err';
+    }
+  }
 
   function hotkeys(e: KeyboardEvent) {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
@@ -120,13 +136,13 @@
     <option value="smallest">Smallest first</option>
   </select>
   <div class="view-toggle" role="group" aria-label="View mode">
-    <button class:active={viewMode === 'grid'} onclick={() => (viewMode = 'grid')} title="Grid">▦</button>
-    <button class:active={viewMode === 'list'} onclick={() => (viewMode = 'list')} title="List">☰</button>
+    <button class:active={viewMode === 'grid'} aria-pressed={viewMode === 'grid'} onclick={() => (viewMode = 'grid')} title="Grid">▦</button>
+    <button class:active={viewMode === 'list'} aria-pressed={viewMode === 'list'} onclick={() => (viewMode = 'list')} title="List">☰</button>
   </div>
 </div>
 
 {#if notice}
-  <p class="notice" class:err={noticeKind === 'err'}>{notice}</p>
+  <p class="notice" class:err={noticeKind === 'err'} role={noticeKind === 'err' ? 'alert' : 'status'}>{notice}</p>
 {/if}
 
 <div class="import-row card">
@@ -139,7 +155,8 @@
       if (e.key === 'Enter') doImport();
     }}
   />
-  <button class="btn-ghost" onclick={doImport}>Scan folder</button>
+  <button class="btn-ghost" onclick={browse}>Browse…</button>
+  <button class="btn-ghost" disabled={!importPath.trim()} onclick={doImport}>Scan folder</button>
 </div>
 
 {#if loading}
@@ -214,7 +231,7 @@
   }
   kbd {
     font-size: 11px;
-    color: var(--fg-faint);
+    color: var(--fg-muted);
     background: var(--surface-hover);
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -236,7 +253,7 @@
   }
   .view-toggle button {
     padding: 10px 14px;
-    color: var(--fg-faint);
+    color: var(--fg-muted);
     font-size: 16px;
   }
   .view-toggle button.active {

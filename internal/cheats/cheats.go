@@ -300,44 +300,6 @@ func ParseWidescreenDir(dir string) (map[string][]byte, error) {
 	return out, nil
 }
 
-// ValidateCHT checks a built .cht content for spec compliance: exactly one
-// master, ≤250 cheats. It returns warnings but error only on hard failure.
-func ValidateCHT(content string) (Warnings, error) {
-	lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
-	var cheats []RawCheat
-	var cur *RawCheat
-	for _, l := range lines {
-		trim := strings.TrimSpace(l)
-		if trim == "" || strings.HasPrefix(trim, "//") || strings.HasPrefix(trim, "#") {
-			continue
-		}
-		if hexCodeRe.MatchString(trim) || regexp.MustCompile(`^[0-9A-Fa-f]{16}$`).MatchString(trim) {
-			if cur != nil {
-				cur.Codes = append(cur.Codes, trim)
-			}
-			continue
-		}
-		// Name line
-		if cur != nil {
-			cheats = append(cheats, *cur)
-		}
-		cur = &RawCheat{Name: trim}
-	}
-	if cur != nil {
-		cheats = append(cheats, *cur)
-	}
-	_, warns, err := Build("TEST_000.00", cheats) // dummy ID for validation
-	// Build will error on missing master; we want to surface that
-	if err != nil {
-		// But for Validate, we want to return the warnings even on error
-		return warns, err
-	}
-	if len(cheats) > MaxCheatsPerFile {
-		warns.DroppedCount = len(cheats) - MaxCheatsPerFile
-	}
-	return warns, nil
-}
-
 // Stage writes content to <root>/<prefix>/CHT/<GameID>.cht via disk.
 // It validates before writing, respects gameIdUncertain gating, and
 // never overwrites a hand file (highest trust). The caller picks the

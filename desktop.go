@@ -13,7 +13,25 @@ import (
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
+
+// App is the Wails binding surface for the SPA (window.go.main.App).
+// The same web build also runs in plain browsers via `oplbm serve`, where
+// window.go is absent — the frontend guards for that and keeps the typed
+// path field as the fallback.
+type App struct {
+	ctx context.Context
+}
+
+// SelectFolder opens the OS-native directory chooser. Empty string means
+// the user cancelled.
+func (a *App) SelectFolder(title string) (string, error) {
+	if title == "" {
+		title = "Choose folder"
+	}
+	return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{Title: title})
+}
 
 // runDesktop hosts the REST+SSE API and the embedded SPA inside a native
 // Wails window: /api/* falls through to the API handler, everything else to
@@ -26,6 +44,7 @@ func runDesktop(st *stack) error {
 	}
 	apiHandler := st.srv.Handler()
 	uiHandler := web.Handler()
+	app := &App{}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			apiHandler.ServeHTTP(w, r)
@@ -37,6 +56,12 @@ func runDesktop(st *stack) error {
 		Title:  "OPL Backup Manager",
 		Width:  1080,
 		Height: 760,
+		Bind: []interface{}{
+			app,
+		},
+		OnStartup: func(ctx context.Context) {
+			app.ctx = ctx
+		},
 		AssetServer: &assetserver.Options{
 			Assets:  ui,
 			Handler: handler,

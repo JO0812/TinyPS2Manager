@@ -90,7 +90,7 @@
   onMount(() => {
     refresh();
     stopEvents = subscribeQueueEvents(mergeEvent);
-    const poll = setInterval(refresh, 5000);
+    const poll = setInterval(refresh, 30000);
     return () => clearInterval(poll);
   });
 
@@ -105,7 +105,7 @@
 <p class="notice">Transfers run one at a time to prevent disc fragmentation on your OPL device.</p>
 
 {#if notice}
-  <p class="notice err">{notice}</p>
+  <p class="notice err" role="alert">{notice}</p>
 {/if}
 
 {#if loading}
@@ -124,7 +124,7 @@
              {job.kind} · {formatBytes(job.bytesDone)} / {formatBytes(job.bytesTotal)} · {eta(job)}{attemptLabel(job)}
           </div>
           {#if job.status === 'running' || (job.bytesTotal > 0 && job.bytesDone > 0)}
-            <div class="progress-track"><div class="progress-fill" style="width: {pct(job)}%"></div></div>
+            <div class="progress-track" role="progressbar" aria-label="Transfer progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(pct(job))}><div class="progress-fill" style="width: {pct(job)}%"></div></div>
           {/if}
           {#if job.status === 'error' && job.error}
             <div class="job-err">{job.error}</div>
@@ -143,8 +143,8 @@
               <button class="btn-ghost sm" onclick={() => act(job.id, 'resume')}>Resume</button>
             {/if}
             {#if job.status !== 'running'}
-              <button class="btn-ghost sm" onclick={() => move(job.id, -1)}>↑</button>
-              <button class="btn-ghost sm" onclick={() => move(job.id, 1)}>↓</button>
+              <button class="btn-ghost sm" aria-label="Move up" onclick={() => move(job.id, -1)}>↑</button>
+              <button class="btn-ghost sm" aria-label="Move down" onclick={() => move(job.id, 1)}>↓</button>
               <button class="btn-danger-ghost sm" onclick={() => act(job.id, job.status === 'pending' ? 'skip' : 'cancel')}>
                 {job.status === 'pending' ? 'Skip' : 'Remove'}
               </button>
@@ -223,8 +223,9 @@
     justify-content: flex-end;
   }
   .sm {
-    padding: 5px 10px;
+    padding: 8px 12px;
     font-size: 12px;
+    min-height: 32px;
   }
   .pill-danger {
     background: var(--danger-soft);

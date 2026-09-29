@@ -144,6 +144,11 @@ func (FileDisk) Open(path string) (io.ReadCloser, error) { return os.Open(path) 
 // CopyToDest streams exactly size bytes from src to finalPath via a
 // same-volume temp file, reporting cumulative bytes through onProgress
 // (nil-safe). Short or long sources are errors; temp files never leak.
+//
+// Progress is reported per segment (32 MiB): os.File.ReadFrom moves the
+// whole remainder in one call for regular files (sendfile/copy_file_range
+// loop internally), so an unsegmented loop would report 0% until the copy
+// completes — multi-GB games would look stuck the entire time.
 func (FileDisk) CopyToDest(ctx context.Context, finalPath string, src io.Reader, size int64, onProgress func(int64)) error {
 	if size < 0 {
 		return fmt.Errorf("negative size %d", size)
@@ -163,6 +168,7 @@ func (FileDisk) CopyToDest(ctx context.Context, finalPath string, src io.Reader,
 			os.Remove(tmpName)
 		}
 	}()
+	const progressStep = 32 << 20
 	var written int64
 	src = ctxReader{ctx: ctx, r: src}
 	for written < size {
@@ -171,7 +177,11 @@ func (FileDisk) CopyToDest(ctx context.Context, finalPath string, src io.Reader,
 			return ctx.Err()
 		default:
 		}
-		n, err := tmp.ReadFrom(io.LimitReader(src, size-written))
+		step := size - written
+		if step > progressStep {
+			step = progressStep
+		}
+		n, err := tmp.ReadFrom(io.LimitReader(src, step))
 		written += n
 		if onProgress != nil {
 			onProgress(written)

@@ -146,22 +146,6 @@ func TestBuildLimit250(t *testing.T) {
 	}
 }
 
-func TestValidateCHT(t *testing.T) {
-	content := "Master\n90111111 11111111\nCheat\n20111111 00000001\n"
-	warns, err := ValidateCHT(content)
-	if err != nil {
-		t.Fatalf("validate: %v", err)
-	}
-	if warns.HasEngineSkipped {
-		t.Error("unexpected skipped")
-	}
-	// Missing master
-	bad := "Cheat\n20111111 00000001\n"
-	if _, err := ValidateCHT(bad); err == nil {
-		t.Error("missing master: expected error")
-	}
-}
-
 func TestStage(t *testing.T) {
 	root := t.TempDir()
 	disk := transfer.FileDisk{}

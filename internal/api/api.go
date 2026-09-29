@@ -46,6 +46,7 @@ func New(qstore *queue.Store, lib *library.Store, settingsPath string, exec *que
 		r.Post("/library/import", s.handleLibraryImport)
 		r.Patch("/library/{id}", s.handleLibraryPatch)
 		r.Get("/library/{id}/enrichment", s.handleLibraryEnrichment)
+		r.Get("/library/{id}/cover", s.handleLibraryCover)
 		r.Get("/destinations", s.handleDestinationsList)
 		r.Get("/destinations/volumes", s.handleVolumesList)
 		r.Post("/destinations", s.handleDestinationsCreate)
@@ -98,10 +99,6 @@ func writeErr(w http.ResponseWriter, status int, field, msg string) {
 	writeJSON(w, status, map[string]any{
 		"errors": []fieldError{{Field: field, Msg: msg}},
 	})
-}
-
-func writeErrs(w http.ResponseWriter, status int, errs []fieldError) {
-	writeJSON(w, status, map[string]any{"errors": errs})
 }
 
 // decodeStrict parses JSON with unknown fields rejected.

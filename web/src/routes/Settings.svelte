@@ -34,7 +34,7 @@
 <h1 class="view-title">Settings</h1>
 
 {#if notice}
-  <p class="notice" class:err={noticeKind === 'err'}>{notice}</p>
+  <p class="notice" class:err={noticeKind === 'err'} role={noticeKind === 'err' ? 'alert' : 'status'}>{notice}</p>
 {/if}
 
 {#if !settings}
@@ -129,6 +129,6 @@
   }
   .hint {
     font-size: 12px;
-    color: var(--fg-faint);
+    color: var(--fg-muted);
   }
 </style>

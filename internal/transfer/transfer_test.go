@@ -76,6 +76,40 @@ func TestCopyToDestRoundTrip(t *testing.T) {
 	}
 }
 
+func TestCopyToDestProgressGranular(t *testing.T) {
+	d := FileDisk{}
+	dir := t.TempDir()
+	// 3 segments of 32 MiB, streamed (no test-side buffering).
+	const size = 96 << 20
+	var progress []int64
+	final := filepath.Join(dir, "big.iso")
+	if err := d.CopyToDest(context.Background(), final, io.LimitReader(rand.Reader, size), size,
+		func(done int64) { progress = append(progress, done) }); err != nil {
+		t.Fatalf("CopyToDest: %v", err)
+	}
+	// Regression: ReadFrom moves the whole remainder in one call for
+	// regular files, so an unsegmented loop reports exactly once at 100%
+	// and multi-GB copies read 0 B the entire time.
+	if len(progress) < 3 {
+		t.Fatalf("only %d progress reports for %d bytes", len(progress), size)
+	}
+	seenMid := false
+	for i, p := range progress {
+		if i > 0 && p < progress[i-1] {
+			t.Fatalf("progress regressed: %v", progress)
+		}
+		if p > 0 && p < size {
+			seenMid = true
+		}
+	}
+	if !seenMid {
+		t.Fatalf("no intermediate progress report: %v", progress)
+	}
+	if progress[len(progress)-1] != size {
+		t.Fatalf("last report = %d, want %d", progress[len(progress)-1], size)
+	}
+}
+
 func TestCopyToDestSizeMismatch(t *testing.T) {
 	d := FileDisk{}
 	for _, tc := range []struct {

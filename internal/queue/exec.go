@@ -458,6 +458,18 @@ func (t *tracker) setPhase(phase string) {
 
 func (t *tracker) add(n int64) {
 	t.done += n
+	t.maybeCheckpoint()
+}
+
+// set records an absolute cumulative byte count, as reported by
+// transfer.FileDisk.CopyToDest. It must not be mixed with add() on the
+// same tracker: add() accumulates deltas, set() replaces the total.
+func (t *tracker) set(n int64) {
+	t.done = n
+	t.maybeCheckpoint()
+}
+
+func (t *tracker) maybeCheckpoint() {
 	if t.total <= 0 {
 		return
 	}
@@ -479,7 +491,7 @@ func (e *Executor) runCopy(ctx context.Context, w workItem, tr *tracker) error {
 	defer src.Close()
 	srcHash := sha256.New()
 	if err := e.disk.CopyToDest(ctx, w.copy.destPath,
-		io.TeeReader(src, srcHash), w.copy.total, tr.add); err != nil {
+		io.TeeReader(src, srcHash), w.copy.total, tr.set); err != nil {
 		return err
 	}
 	return e.verifyFile(tr, w.copy.destPath, w.copy.total, srcHash.Sum(nil))
@@ -641,7 +653,7 @@ func (e *Executor) copyFileForEmber(ctx context.Context, srcPath, destPath strin
 		return err
 	}
 	h := sha256.New()
-	if err := e.disk.CopyToDest(ctx, destPath, io.TeeReader(src, h), fi.Size(), tr.add); err != nil {
+	if err := e.disk.CopyToDest(ctx, destPath, io.TeeReader(src, h), fi.Size(), tr.set); err != nil {
 		return err
 	}
 	return e.verifyFile(tr, destPath, fi.Size(), h.Sum(nil))

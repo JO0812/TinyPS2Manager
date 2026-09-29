@@ -41,12 +41,6 @@ export const activeDest = derived([destinations, activePath], ([$dests, $path]) 
   $dests.find((d) => d.path === $path),
 );
 
-export const driveLabel = derived(activeDest, ($d) => {
-  if (!$d) return '';
-  const leaf = $d.path.split('/').filter(Boolean).pop() ?? $d.path;
-  return `${leaf} · ${( $d.fsOverride || $d.filesystem).toUpperCase()}`;
-});
-
 export const driveSpace = derived(activeDest, ($d) => {
   if (!$d || $d.totalBytes <= 0) return '';
   const used = $d.totalBytes - Math.max(0, $d.freeBytes);

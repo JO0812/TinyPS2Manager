@@ -180,6 +180,8 @@ export const api = {
     get<Enrichment>(
       `/api/library/${id}/enrichment${destinationPath ? `?destinationPath=${encodeURIComponent(destinationPath)}` : ''}`,
     ),
+  coverUrl: (id: number, destinationPath: string) =>
+    `/api/library/${id}/cover?destinationPath=${encodeURIComponent(destinationPath)}`,
 
   destinations: () => get<Destination[]>('/api/destinations'),
   volumes: () => get<Volume[]>('/api/destinations/volumes'),

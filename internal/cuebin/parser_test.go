@@ -61,10 +61,6 @@ FILE "track2.bin" BINARY
 	if !s.Tracks[2].HasPregap || s.Tracks[2].Pregap.Frames() != 150 {
 		t.Errorf("track 3 pregap = %+v, want 00:02:00", s.Tracks[2].Pregap)
 	}
-	// 00:02:00 -> LBA 0 (150 frames minus 150 lead-in).
-	if got := (MSF{M: 0, S: 2, F: 0}).LBA(); got != 0 {
-		t.Errorf("LBA(00:02:00) = %d, want 0", got)
-	}
 }
 
 func TestParseCRLF(t *testing.T) {

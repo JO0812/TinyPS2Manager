@@ -40,6 +40,10 @@
   ];
 
   $: dest = $activeDest;
+  $: reachableDests = $destinations.filter((d) => d.reachable !== false);
+  $: spaceText =
+    $driveSpace ||
+    (!dest || dest.freeBytes < 0 ? 'size unknown' : `${formatBytes(dest.freeBytes)} free`);
   $: usedPct =
     dest && dest.totalBytes > 0 && dest.freeBytes >= 0
       ? Math.min(100, Math.max(0, ((dest.totalBytes - dest.freeBytes) / dest.totalBytes) * 100))
@@ -84,7 +88,7 @@
           <path d="M19 12a7 7 0 0 0-.14-1.4l2-1.55-2-3.46-2.36.95a7 7 0 0 0-2.42-1.4L13.7 2.6h-3.4l-.38 2.54a7 7 0 0 0-2.42 1.4l-2.36-.95-2 3.46 2 1.55a7 7 0 0 0 0 2.8l-2 1.55 2 3.46 2.36-.95a7 7 0 0 0 2.42 1.4l.38 2.54h3.4l.38-2.54a7 7 0 0 0 2.42-1.4l2.36.95 2-3.46-2-1.55c.1-.46.14-.93.14-1.4Z" />
         </svg>
       </button>
-      <span class="api-dot" class:ok={apiOk === true} class:bad={apiOk === false} title={apiOk === null ? 'Connecting…' : apiOk ? 'API connected' : 'API unreachable — is oplbm serve running?'}></span>
+      <span class="api-dot" class:ok={apiOk === true} class:bad={apiOk === false} role="status" aria-label={apiOk === null ? 'Connecting…' : apiOk ? 'API connected' : 'API unreachable — is oplbm serve running?'} title={apiOk === null ? 'Connecting…' : apiOk ? 'API connected' : 'API unreachable — is oplbm serve running?'}></span>
     </div>
   </aside>
 
@@ -97,29 +101,30 @@
         </svg>
       </span>
       {#if dest}
-        <button class="drive-name" onclick={() => (view = 'toolbox')} title="Open Toolbox to manage drives">
+        <button class="drive-name" onclick={() => (view = 'toolbox')} title={dest.path}>
           {dest.path.split('/').filter(Boolean).pop() ?? dest.path}
           {#if dest.reachable === false}<span class="pill pill-warn">unplugged</span>{/if}
         </button>
-        <span class="muted small drive-path">{dest.path}</span>
-        {#if $destinations.length > 1}
-          <select
-            class="drive-switch"
-            value={$activePath}
-            onchange={(e) => setActivePath(e.currentTarget.value)}
-            aria-label="Active drive"
-          >
-            {#each $destinations as d}
-              <option value={d.path}>{d.path}{d.reachable === false ? ' (unplugged)' : ''}</option>
-            {/each}
-          </select>
-        {/if}
-        <span class="muted small drive-space">
-          {#if dest.freeBytes < 0}size unknown{:else}{formatBytes(dest.freeBytes)} free{/if}
-          {#if $driveSpace} · {$driveSpace}{/if}
-        </span>
-        {#if dest.totalBytes > 0 && dest.freeBytes >= 0}
-          <span class="mini-track"><span class="mini-fill" style="width: {usedPct}%"></span></span>
+        {#if dest.reachable === false}
+          <span class="muted small">size unknown</span>
+          <button class="btn-ghost small" onclick={() => (view = 'toolbox')}>Open Toolbox</button>
+        {:else}
+          {#if reachableDests.length > 1}
+            <select
+              class="drive-switch"
+              value={$activePath}
+              onchange={(e) => setActivePath(e.currentTarget.value)}
+              aria-label="Active drive"
+            >
+              {#each reachableDests as d}
+                <option value={d.path}>{d.path}</option>
+              {/each}
+            </select>
+          {/if}
+          <span class="muted small drive-space">{spaceText}</span>
+          {#if dest.totalBytes > 0 && dest.freeBytes >= 0}
+            <span class="mini-track" aria-hidden="true"><span class="mini-fill" style="width: {usedPct}%"></span></span>
+          {/if}
         {/if}
       {:else if $drivesError}
         <span class="muted small">Drive list unavailable — { $drivesError }</span>
@@ -251,12 +256,6 @@
   }
   .drive-name:hover {
     background: var(--surface-hover);
-  }
-  .drive-path {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 320px;
   }
   .drive-switch {
     background: var(--bg-raised);

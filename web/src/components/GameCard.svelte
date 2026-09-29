@@ -175,10 +175,18 @@ import { getActivePath } from '../lib/drive';
   $: isUncertain = item.gameIdUncertain;
 
   let enrich: { artKey: string; artStatus: string; cheatStatus: string; regionMatched: boolean } | null = null;
+  let coverUrl = '';
+  let coverFailed = false;
 
   async function loadEnrich() {
     try {
-      enrich = await api.enrichment(item.id, getActivePath() || undefined);
+      const dp = getActivePath() || undefined;
+      enrich = await api.enrichment(item.id, dp);
+      coverFailed = false;
+      coverUrl =
+        enrich && (enrich.artStatus === 'found' || enrich.artStatus === 'custom') && dp
+          ? api.coverUrl(item.id, dp)
+          : '';
     } catch {
       // silent: enrichment is best-effort
     }
@@ -194,9 +202,13 @@ import { getActivePath } from '../lib/drive';
 </script>
 
 <div class="game-card" class:list>
-  <div class="tile" style="--tile-hue: {hue(item.title)}deg" title="Cover art arrives in M5">
+  <div class="tile" style="--tile-hue: {hue(item.title)}deg" title={coverUrl && !coverFailed ? `${item.title} cover art` : 'Cover art arrives in M5'}>
+    {#if coverUrl && !coverFailed}
+      <img class="cover" src={coverUrl} alt="{item.title} cover art" loading="lazy" onerror={() => { coverFailed = true; }} />
+    {:else}
+      <span class="mono">{monogram(item.title)}</span>
+    {/if}
     <span class="platform">{item.platform.toUpperCase()}</span>
-    <span class="mono">{monogram(item.title)}</span>
   </div>
   <div class="meta">
     {#if renaming}
@@ -286,19 +298,28 @@ import { getActivePath } from '../lib/drive';
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    overflow: hidden;
     display: flex;
     flex-direction: column;
   }
   .tile {
-    aspect-ratio: 1 / 1;
+    aspect-ratio: 135 / 190;
     display: flex;
     align-items: center;
     justify-content: center;
     position: relative;
+    overflow: hidden;
+    border-radius: var(--radius) var(--radius) 0 0;
     background:
       radial-gradient(120% 90% at 50% 0%, hsl(var(--tile-hue) 60% 32%) 0%, hsl(var(--tile-hue) 55% 12%) 70%),
       var(--bg-raised);
+  }
+  .cover {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
   }
   .platform {
     position: absolute;
@@ -345,14 +366,6 @@ import { getActivePath } from '../lib/drive';
     background: rgba(251, 191, 36, 0.16);
     color: var(--warning);
   }
-  .pill-green {
-    background: var(--success-soft, #d1f0d1);
-    color: var(--success, #0a6b0a);
-  }
-  .pill-purple {
-    background: #e8d5ff;
-    color: #4c1d95;
-  }
   .menu-wrap {
     position: absolute;
     right: 8px;
@@ -362,8 +375,9 @@ import { getActivePath } from '../lib/drive';
     font-size: 18px;
     letter-spacing: 1px;
     color: var(--fg-muted);
-    padding: 2px 8px;
+    padding: 8px 12px;
     border-radius: 8px;
+    min-height: 32px;
   }
   .dots:hover {
     background: var(--surface-hover);
@@ -439,8 +453,9 @@ import { getActivePath } from '../lib/drive';
     flex-direction: row;
   }
   .game-card.list .tile {
-    width: 72px;
-    aspect-ratio: auto;
+    width: 76px;
+    flex-shrink: 0;
+    border-radius: var(--radius) 0 0 var(--radius);
   }
   .game-card.list .mono {
     font-size: 24px;
